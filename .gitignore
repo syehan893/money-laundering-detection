@@ -1,0 +1,9 @@
+# Node modules
+node_modules/
+frontend/node_modules/
+
+# Dataset files (too large for GitHub)
+*.csv
+
+# Screenshots (optional - remove this line if you want to include them)
+images_screenshot/

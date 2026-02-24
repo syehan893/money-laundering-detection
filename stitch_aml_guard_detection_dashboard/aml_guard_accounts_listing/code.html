@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AML Guard Accounts Listing</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "primary": "#135bec",
+            "background-light": "#f6f6f8",
+            "background-dark": "#0a0e1a", // User requested #0a0e1a
+            "card-dark": "#131b2c",
+            "border-dark": "#1f293a",
+          },
+          fontFamily: {
+            "display": ["Inter", "sans-serif"],
+            "sans": ["Inter", "sans-serif"],
+          },
+          borderRadius: {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+        },
+      },
+    }
+  </script>
+</head>
+<body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100 font-display min-h-screen">
+<div class="flex min-h-screen w-full overflow-hidden">
+<!-- Sidebar -->
+<aside class="hidden md:flex flex-col w-64 bg-white dark:bg-[#0f141f] border-r border-slate-200 dark:border-border-dark shrink-0">
+<div class="p-6 flex items-center gap-3">
+<div class="flex items-center justify-center w-10 h-10 rounded-full bg-primary/20 text-primary">
+<span class="material-symbols-outlined text-2xl">shield_lock</span>
+</div>
+<div>
+<h1 class="text-slate-900 dark:text-white text-lg font-bold leading-tight">AML Guard</h1>
+<p class="text-slate-500 dark:text-slate-400 text-xs font-medium">Enterprise Security</p>
+</div>
+</div>
+<nav class="flex-1 px-4 flex flex-col gap-2 mt-4">
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="font-medium text-sm">Dashboard</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-primary/10 text-primary dark:text-blue-400 border border-primary/20" href="#">
+<span class="material-symbols-outlined fill-1">group</span>
+<span class="font-medium text-sm">Accounts</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" href="#">
+<span class="material-symbols-outlined">swap_horiz</span>
+<span class="font-medium text-sm">Transactions</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" href="#">
+<span class="material-symbols-outlined">description</span>
+<span class="font-medium text-sm">Reports</span>
+</a>
+</nav>
+<div class="p-4 border-t border-slate-200 dark:border-border-dark mt-auto">
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-medium text-sm">Settings</span>
+</a>
+<div class="mt-4 flex items-center gap-3 px-3">
+<div class="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700 bg-center bg-cover" data-alt="User profile picture" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCwrnA9SBfDY4CtFDjUa-QBG9DrhadmFDfx3NA689f7UrF_VdgCYVwEEnd5uY85O0NqQZlNRQT4OBSSAS7VlIRvWHh6-lmzPHou8Xsyb-AkZq8lW2kAuE7XIHcv9W1rSLKRg_NdAyhqKDk72zvEyEkGSuUE136Ks8iQxqS5PYebG9yel9hz2mu5CZir_Rp-T-4ZmJpmIXxIyzxMAgGfzgsQAPavYQw82TADXvqAjzaEy7lSzqpr-apeCE6IXMBlHipN9_G1DHiii2Ms');"></div>
+<div class="flex flex-col">
+<span class="text-sm font-medium text-slate-900 dark:text-white">Alex Morgan</span>
+<span class="text-xs text-slate-500 dark:text-slate-400">Admin</span>
+</div>
+</div>
+</div>
+</aside>
+<!-- Main Content -->
+<main class="flex-1 flex flex-col h-screen overflow-hidden">
+<!-- Header / Top Bar -->
+<header class="h-16 flex items-center justify-between px-8 border-b border-slate-200 dark:border-border-dark bg-white dark:bg-[#0f141f]">
+<div class="flex items-center gap-4 text-slate-500 dark:text-slate-400 text-sm">
+<span>Home</span>
+<span class="material-symbols-outlined text-base">chevron_right</span>
+<span class="text-slate-900 dark:text-white font-medium">Accounts Overview</span>
+</div>
+<div class="flex items-center gap-4">
+<button class="relative p-2 text-slate-500 dark:text-slate-400 hover:text-primary transition-colors">
+<span class="material-symbols-outlined">notifications</span>
+<span class="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full"></span>
+</button>
+<button class="p-2 text-slate-500 dark:text-slate-400 hover:text-primary transition-colors">
+<span class="material-symbols-outlined">help</span>
+</button>
+</div>
+</header>
+<!-- Scrollable Content -->
+<div class="flex-1 overflow-y-auto p-4 md:p-8">
+<div class="max-w-[1400px] mx-auto flex flex-col gap-6">
+<!-- Page Title & Subtitle -->
+<div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
+<div>
+<h2 class="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Accounts Overview</h2>
+<p class="text-slate-500 dark:text-slate-400 mt-1">Monitor and manage high-risk financial entities and their activities.</p>
+</div>
+<div class="flex gap-2">
+<button class="flex items-center gap-2 bg-white dark:bg-card-dark border border-slate-200 dark:border-border-dark hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm">
+<span class="material-symbols-outlined text-lg">download</span>
+                        Export
+                    </button>
+<button class="flex items-center gap-2 bg-primary hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm shadow-blue-500/20">
+<span class="material-symbols-outlined text-lg">add</span>
+                        Add Account
+                    </button>
+</div>
+</div>
+<!-- Stats/Filters Row -->
+<div class="flex flex-col xl:flex-row gap-4 items-start xl:items-center justify-between mt-2">
+<div class="flex flex-wrap gap-2 md:gap-4 bg-white dark:bg-card-dark/50 p-1.5 rounded-xl border border-slate-200 dark:border-border-dark shadow-sm">
+<button class="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all">
+<div class="w-2 h-2 rounded-full bg-emerald-500"></div>
+<span class="text-sm font-medium">Low (310,748)</span>
+</button>
+<button class="flex items-center gap-2 px-4 py-2 rounded-lg bg-transparent hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 transition-all">
+<div class="w-2 h-2 rounded-full bg-amber-500"></div>
+<span class="text-sm font-medium">Moderate (7,843)</span>
+</button>
+<button class="flex items-center gap-2 px-4 py-2 rounded-lg bg-transparent hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 transition-all">
+<div class="w-2 h-2 rounded-full bg-red-500"></div>
+<span class="text-sm font-medium">High (620)</span>
+</button>
+<button class="flex items-center gap-2 px-4 py-2 rounded-lg bg-transparent hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 transition-all">
+<div class="w-2 h-2 rounded-full bg-red-800"></div>
+<span class="text-sm font-medium">Critical (345)</span>
+</button>
+</div>
+<div class="w-full xl:w-auto flex-1 xl:max-w-md relative group">
+<div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+<span class="material-symbols-outlined text-slate-400 dark:text-slate-500 group-focus-within:text-primary transition-colors">search</span>
+</div>
+<input class="block w-full pl-10 pr-3 py-2.5 border border-slate-200 dark:border-border-dark rounded-xl leading-5 bg-white dark:bg-card-dark text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary sm:text-sm shadow-sm transition-all" placeholder="Search by Account ID, Name, or Transaction Hash..." type="text"/>
+</div>
+</div>
+<!-- Table Container -->
+<div class="bg-white dark:bg-card-dark/40 backdrop-blur-sm border border-slate-200 dark:border-border-dark rounded-xl overflow-hidden shadow-sm">
+<div class="overflow-x-auto">
+<table class="min-w-full divide-y divide-slate-200 dark:divide-slate-800/50">
+<thead class="bg-slate-50 dark:bg-slate-800/50">
+<tr>
+<th class="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider" scope="col">Account ID</th>
+<th class="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider" scope="col">Risk Score</th>
+<th class="px-6 py-4 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider" scope="col">Risk Category</th>
+<th class="px-6 py-4 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider" scope="col">Total Sent ($)</th>
+<th class="px-6 py-4 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider" scope="col">Total Received ($)</th>
+<th class="px-6 py-4 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider" scope="col">Partners</th>
+<th class="px-6 py-4 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider" scope="col">Actions</th>
+</tr>
+</thead>
+<tbody class="bg-white dark:bg-transparent divide-y divide-slate-200 dark:divide-slate-800/50">
+<!-- Row 1 -->
+<tr class="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
+<td class="px-6 py-4 whitespace-nowrap">
+<div class="flex items-center">
+<div class="flex-shrink-0 h-10 w-10 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-500">
+<span class="material-symbols-outlined text-lg">account_balance</span>
+</div>
+<div class="ml-4">
+<div class="text-sm font-medium text-slate-900 dark:text-white">ACC-8921-XJ</div>
+<div class="text-xs text-slate-500 dark:text-slate-400">Created 2d ago</div>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 whitespace-nowrap align-middle">
+<div class="w-full max-w-[120px]">
+<div class="flex items-center justify-between text-xs mb-1">
+<span class="text-slate-600 dark:text-slate-300 font-medium">32/100</span>
+</div>
+<div class="overflow-hidden h-1.5 text-xs flex rounded bg-slate-200 dark:bg-slate-700">
+<div class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-emerald-500" style="width: 32%"></div>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 whitespace-nowrap">
+<span class="px-2.5 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20">
+                                        Low Risk
+                                    </span>
+</td>
+<td class="px-6 py-4 whitespace-nowrap text-right text-sm text-slate-600 dark:text-slate-300 font-mono">
+                                    12,450.00
+                                </td>
+<td class="px-6 py-4 whitespace-nowrap text-right text-sm text-slate-600 dark:text-slate-300 font-mono">
+                                    8,200.00
+                                </td>
+<td class="px-6 py-4 whitespace-nowrap text-center">
+<div class="flex -space-x-2 overflow-hidden justify-center">
+<div class="inline-block h-8 w-8 rounded-full ring-2 ring-white dark:ring-[#131b2c] bg-slate-200 bg-cover bg-center" data-alt="Partner avatar 1" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCfNzmAJG3IUIKm4YAAyyn5RJv3W04787puGqEXpChMWiDdIYyIHnIbjxFV_xb7iUuSAr2Cf-cIEv9BjdngpTEGonLRuz3FVzZjJI0LjmrKmcOoid4fHnRY2j3rUOF0fsqf7uJcrhppmE_iftKH8UpCS9-pgyWMmDFw3lhCJixFh2qqX0GVSuYVzdPL_2nknq1zLoVbNCGc3Zx4RCm81ltsSJNXITvI5BuJxzo5giWBNvG1To0mzxuwZFLHZ89H9yHqZcST-ojRX8pg')"></div>
+<div class="inline-block h-8 w-8 rounded-full ring-2 ring-white dark:ring-[#131b2c] bg-slate-200 bg-cover bg-center" data-alt="Partner avatar 2" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCS-DUXgHLtxwWxBu88pKyhMPBnG7v7svxD6cIwLq5fnib6mswc44S6Zi-z7NRYR7M0_nhmC5UdDL8FTcJJOJFHE0SvQgtQZSsr2heAaZtLyZQXbSVCATaDbSZb361WIFN_QL3SF9YHyvHmMn7Io61eGeHEwOUrAyAZWid_4-e0kThFJdXU1r4QBcbaOMU8EK3hB-P1lXS14zylq4WBvzW9dTBI9WcGJSKBNPkpuz34-dFk2k0WjeLnl3lMOWZCuHjxvvoHVS4X39FS')"></div>
+<div class="inline-block h-8 w-8 rounded-full ring-2 ring-white dark:ring-[#131b2c] bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-xs text-slate-500 font-medium">+2</div>
+</div>
+</td>
+<td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+<button class="text-primary hover:text-blue-400 font-semibold text-sm">View</button>
+</td>
+</tr>
+<!-- Row 2 -->
+<tr class="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors bg-slate-50/30 dark:bg-slate-800/10">
+<td class="px-6 py-4 whitespace-nowrap">
+<div class="flex items-center">
+<div class="flex-shrink-0 h-10 w-10 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-500">
+<span class="material-symbols-outlined text-lg">corporate_fare</span>
+</div>
+<div class="ml-4">
+<div class="text-sm font-medium text-slate-900 dark:text-white">ACC-1102-MK</div>
+<div class="text-xs text-slate-500 dark:text-slate-400">Created 5h ago</div>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 whitespace-nowrap align-middle">
+<div class="w-full max-w-[120px]">
+<div class="flex items-center justify-between text-xs mb-1">
+<span class="text-slate-600 dark:text-slate-300 font-medium">88/100</span>
+</div>
+<div class="overflow-hidden h-1.5 text-xs flex rounded bg-slate-200 dark:bg-slate-700">
+<div class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-red-600" style="width: 88%"></div>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 whitespace-nowrap">
+<span class="px-2.5 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-400 border border-red-200 dark:border-red-500/20">
+                                        Critical
+                                    </span>
+</td>
+<td class="px-6 py-4 whitespace-nowrap text-right text-sm text-slate-600 dark:text-slate-300 font-mono">
+                                    1,200,500.00
+                                </td>
+<td class="px-6 py-4 whitespace-nowrap text-right text-sm text-slate-600 dark:text-slate-300 font-mono">
+                                    450.00
+                                </td>
+<td class="px-6 py-4 whitespace-nowrap text-center">
+<div class="flex -space-x-2 overflow-hidden justify-center">
+<div class="inline-block h-8 w-8 rounded-full ring-2 ring-white dark:ring-[#131b2c] bg-slate-200 bg-cover bg-center" data-alt="Partner avatar 3" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBPntBpjmHnOBzXEsQAHdO6Uja_m3cUKhg86dO6Z8uUAoR-o9NFExevm5qcG_t3kD45HvFqw49gMu7ZrBdzuhYN7m7WqybeGW6lFX_bRkG2M99jFSSPHmmEZutFSSKcZ9IGbmGBm1WZTm2ka6BbWZR1EUikuNt15Ne_GDtvv4MdFLt-xxtn2KPlvKFCDBgLKR-0fOuNBTnFq5HfyiQN1k31Z7sU7PFjxt_K75EtYjwwhPU-UAYbUQUzF5c7u8q9ZYPBnlI359AiMoE2')"></div>
+</div>
+</td>
+<td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+<button class="text-primary hover:text-blue-400 font-semibold text-sm">View</button>
+</td>
+</tr>
+<!-- Row 3 -->
+<tr class="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
+<td class="px-6 py-4 whitespace-nowrap">
+<div class="flex items-center">
+<div class="flex-shrink-0 h-10 w-10 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-500">
+<span class="material-symbols-outlined text-lg">account_balance_wallet</span>
+</div>
+<div class="ml-4">
+<div class="text-sm font-medium text-slate-900 dark:text-white">ACC-3341-PL</div>
+<div class="text-xs text-slate-500 dark:text-slate-400">Created 1w ago</div>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 whitespace-nowrap align-middle">
+<div class="w-full max-w-[120px]">
+<div class="flex items-center justify-between text-xs mb-1">
+<span class="text-slate-600 dark:text-slate-300 font-medium">65/100</span>
+</div>
+<div class="overflow-hidden h-1.5 text-xs flex rounded bg-slate-200 dark:bg-slate-700">
+<div class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-amber-500" style="width: 65%"></div>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 whitespace-nowrap">
+<span class="px-2.5 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-amber-100 text-amber-800 dark:bg-amber-500/10 dark:text-amber-400 border border-amber-200 dark:border-amber-500/20">
+                                        High Risk
+                                    </span>
+</td>
+<td class="px-6 py-4 whitespace-nowrap text-right text-sm text-slate-600 dark:text-slate-300 font-mono">
+                                    45,000.00
+                                </td>
+<td class="px-6 py-4 whitespace-nowrap text-right text-sm text-slate-600 dark:text-slate-300 font-mono">
+                                    150,000.00
+                                </td>
+<td class="px-6 py-4 whitespace-nowrap text-center">
+<div class="flex -space-x-2 overflow-hidden justify-center">
+<div class="inline-block h-8 w-8 rounded-full ring-2 ring-white dark:ring-[#131b2c] bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-xs text-slate-500 font-medium">N/A</div>
+</div>
+</td>
+<td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+<button class="text-primary hover:text-blue-400 font-semibold text-sm">View</button>
+</td>
+</tr>
+<!-- Row 4 -->
+<tr class="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors bg-slate-50/30 dark:bg-slate-800/10">
+<td class="px-6 py-4 whitespace-nowrap">
+<div class="flex items-center">
+<div class="flex-shrink-0 h-10 w-10 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-500">
+<span class="material-symbols-outlined text-lg">payments</span>
+</div>
+<div class="ml-4">
+<div class="text-sm font-medium text-slate-900 dark:text-white">ACC-5512-TR</div>
+<div class="text-xs text-slate-500 dark:text-slate-400">Created 3d ago</div>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 whitespace-nowrap align-middle">
+<div class="w-full max-w-[120px]">
+<div class="flex items-center justify-between text-xs mb-1">
+<span class="text-slate-600 dark:text-slate-300 font-medium">45/100</span>
+</div>
+<div class="overflow-hidden h-1.5 text-xs flex rounded bg-slate-200 dark:bg-slate-700">
+<div class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-yellow-500" style="width: 45%"></div>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 whitespace-nowrap">
+<span class="px-2.5 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800 dark:bg-yellow-500/10 dark:text-yellow-400 border border-yellow-200 dark:border-yellow-500/20">
+                                        Moderate
+                                    </span>
+</td>
+<td class="px-6 py-4 whitespace-nowrap text-right text-sm text-slate-600 dark:text-slate-300 font-mono">
+                                    78,900.00
+                                </td>
+<td class="px-6 py-4 whitespace-nowrap text-right text-sm text-slate-600 dark:text-slate-300 font-mono">
+                                    82,100.00
+                                </td>
+<td class="px-6 py-4 whitespace-nowrap text-center">
+<div class="flex -space-x-2 overflow-hidden justify-center">
+<div class="inline-block h-8 w-8 rounded-full ring-2 ring-white dark:ring-[#131b2c] bg-slate-200 bg-cover bg-center" data-alt="Partner avatar 4" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBMSCgyz_XWK7gYKr3YEXGgsmc16gNw7k8brpSRBBY8Ql4pMdWTmsdf6SbC9Jm3SmN20EpzYi89UhY-TkYFl8KYh-5dGC7i7VvcdVpphYIi2_FmtfyDd_mU4hRKbqPTu6ouCE2tskGqvMsG_hFiIQBTo3xCh4c473JXltXs3F5l_apn7HZAZaQWNpQgd79Zr-9YwHG4vvGLIbHo3kinvjxIKRG3zfE2KOV1VAeDtTaC0PCyJt-_MGv3uEEOUuv9VTaAwQs8eDiWw6ku')"></div>
+<div class="inline-block h-8 w-8 rounded-full ring-2 ring-white dark:ring-[#131b2c] bg-slate-200 bg-cover bg-center" data-alt="Partner avatar 5" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBpN7_6xSqFd4BcWmv_3uU9O5su1esRGXgvHh2CNtzlC0BCDPcwU12Lmul1MqnF7cFtgmRxbK1082-vLxaxH84qtd3Ipir_zF8OVoDmX3QK5FgHBXrWzvoc0ICJdu0sKWbc3F-dJGkk7OqZyNT3tK8suRi3E99MxsLIGaSXUN7_dqcPk6RvjQpZDreYvG7z6oewVnaLhXlOL0PV9iwMmzIavKcW9bMYXOB84hMwhX28Ka5bgDEcEOqREjFCKYux-Y-AGXvNL-g0Oklx')"></div>
+</div>
+</td>
+<td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+<button class="text-primary hover:text-blue-400 font-semibold text-sm">View</button>
+</td>
+</tr>
+<!-- Row 5 -->
+<tr class="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
+<td class="px-6 py-4 whitespace-nowrap">
+<div class="flex items-center">
+<div class="flex-shrink-0 h-10 w-10 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-500">
+<span class="material-symbols-outlined text-lg">credit_card</span>
+</div>
+<div class="ml-4">
+<div class="text-sm font-medium text-slate-900 dark:text-white">ACC-7721-OP</div>
+<div class="text-xs text-slate-500 dark:text-slate-400">Created 12h ago</div>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 whitespace-nowrap align-middle">
+<div class="w-full max-w-[120px]">
+<div class="flex items-center justify-between text-xs mb-1">
+<span class="text-slate-600 dark:text-slate-300 font-medium">92/100</span>
+</div>
+<div class="overflow-hidden h-1.5 text-xs flex rounded bg-slate-200 dark:bg-slate-700">
+<div class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-red-800" style="width: 92%"></div>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 whitespace-nowrap">
+<span class="px-2.5 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300 border border-red-200 dark:border-red-500/20">
+                                        Critical
+                                    </span>
+</td>
+<td class="px-6 py-4 whitespace-nowrap text-right text-sm text-slate-600 dark:text-slate-300 font-mono">
+                                    5,600,000.00
+                                </td>
+<td class="px-6 py-4 whitespace-nowrap text-right text-sm text-slate-600 dark:text-slate-300 font-mono">
+                                    2,000.00
+                                </td>
+<td class="px-6 py-4 whitespace-nowrap text-center">
+<div class="flex -space-x-2 overflow-hidden justify-center">
+<div class="inline-block h-8 w-8 rounded-full ring-2 ring-white dark:ring-[#131b2c] bg-slate-200 bg-cover bg-center" data-alt="Partner avatar 6" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDFiNX5nTvh-iBojcZU_9VD3f_VeW3wA6nQ306mBOe1qVDNFG23pPTwdB0qI-Wh5DzZRgBkuzrq_XV4wsF-3pm4-3eoUUsN_Q7FfnMFLNlcUrkfgCb5XInycBXkKDBMOZEbAtthGtoDpNr_d4jvFWOLraG8mAPgoc3atY4LXW2BgKt-tk0OXT_3GXSCcBqOHhWEti30SmYLRlX8UYmuTB52CeP2WhopaTddQ-DTo0LUvWVoihP_AHmjergxd-R8MCUau4A9hg3EIqwA')"></div>
+</div>
+</td>
+<td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+<button class="text-primary hover:text-blue-400 font-semibold text-sm">View</button>
+</td>
+</tr>
+<!-- Row 6 -->
+<tr class="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors bg-slate-50/30 dark:bg-slate-800/10">
+<td class="px-6 py-4 whitespace-nowrap">
+<div class="flex items-center">
+<div class="flex-shrink-0 h-10 w-10 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-500">
+<span class="material-symbols-outlined text-lg">account_balance</span>
+</div>
+<div class="ml-4">
+<div class="text-sm font-medium text-slate-900 dark:text-white">ACC-2291-ZX</div>
+<div class="text-xs text-slate-500 dark:text-slate-400">Created 4w ago</div>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 whitespace-nowrap align-middle">
+<div class="w-full max-w-[120px]">
+<div class="flex items-center justify-between text-xs mb-1">
+<span class="text-slate-600 dark:text-slate-300 font-medium">71/100</span>
+</div>
+<div class="overflow-hidden h-1.5 text-xs flex rounded bg-slate-200 dark:bg-slate-700">
+<div class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-amber-500" style="width: 71%"></div>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 whitespace-nowrap">
+<span class="px-2.5 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-amber-100 text-amber-800 dark:bg-amber-500/10 dark:text-amber-400 border border-amber-200 dark:border-amber-500/20">
+                                        High Risk
+                                    </span>
+</td>
+<td class="px-6 py-4 whitespace-nowrap text-right text-sm text-slate-600 dark:text-slate-300 font-mono">
+                                    320,000.00
+                                </td>
+<td class="px-6 py-4 whitespace-nowrap text-right text-sm text-slate-600 dark:text-slate-300 font-mono">
+                                    10,000.00
+                                </td>
+<td class="px-6 py-4 whitespace-nowrap text-center">
+<div class="flex -space-x-2 overflow-hidden justify-center">
+<div class="inline-block h-8 w-8 rounded-full ring-2 ring-white dark:ring-[#131b2c] bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-xs text-slate-500 font-medium">N/A</div>
+</div>
+</td>
+<td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+<button class="text-primary hover:text-blue-400 font-semibold text-sm">View</button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Pagination -->
+<div class="bg-white dark:bg-slate-800/20 px-4 py-3 flex items-center justify-between border-t border-slate-200 dark:border-border-dark sm:px-6">
+<div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+<div>
+<p class="text-sm text-slate-700 dark:text-slate-400">
+                                Showing
+                                <span class="font-medium text-slate-900 dark:text-white">1</span>
+                                to
+                                <span class="font-medium text-slate-900 dark:text-white">20</span>
+                                of
+                                <span class="font-medium text-slate-900 dark:text-white">319,556</span>
+                                results
+                            </p>
+</div>
+<div>
+<nav aria-label="Pagination" class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
+<a class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-slate-300 dark:border-border-dark bg-white dark:bg-card-dark text-sm font-medium text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors" href="#">
+<span class="sr-only">Previous</span>
+<span class="material-symbols-outlined text-sm">chevron_left</span>
+</a>
+<a aria-current="page" class="z-10 bg-primary/10 border-primary text-primary relative inline-flex items-center px-4 py-2 border text-sm font-medium" href="#">
+                                    1
+                                </a>
+<a class="bg-white dark:bg-card-dark border-slate-300 dark:border-border-dark text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 relative inline-flex items-center px-4 py-2 border text-sm font-medium transition-colors" href="#">
+                                    2
+                                </a>
+<a class="bg-white dark:bg-card-dark border-slate-300 dark:border-border-dark text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 relative inline-flex items-center px-4 py-2 border text-sm font-medium transition-colors" href="#">
+                                    3
+                                </a>
+<span class="relative inline-flex items-center px-4 py-2 border border-slate-300 dark:border-border-dark bg-white dark:bg-card-dark text-sm font-medium text-slate-700 dark:text-slate-400">
+                                    ...
+                                </span>
+<a class="bg-white dark:bg-card-dark border-slate-300 dark:border-border-dark text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 relative inline-flex items-center px-4 py-2 border text-sm font-medium transition-colors" href="#">
+                                    8
+                                </a>
+<a class="bg-white dark:bg-card-dark border-slate-300 dark:border-border-dark text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 relative inline-flex items-center px-4 py-2 border text-sm font-medium transition-colors" href="#">
+                                    9
+                                </a>
+<a class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-slate-300 dark:border-border-dark bg-white dark:bg-card-dark text-sm font-medium text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors" href="#">
+<span class="sr-only">Next</span>
+<span class="material-symbols-outlined text-sm">chevron_right</span>
+</a>
+</nav>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
+</body></html>
