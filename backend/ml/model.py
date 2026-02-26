@@ -29,17 +29,17 @@ class FocalLoss(nn.Module):
         self.gamma = gamma
         self.reduction = reduction
 
-    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            inputs: Predicted probabilities (after sigmoid), shape (N,).
+            logits: Raw logits (before sigmoid), shape (N,).
             targets: Ground truth labels (0 or 1), shape (N,).
         """
-        # Clamp for numerical stability
-        p = inputs.clamp(min=1e-7, max=1 - 1e-7)
+        # Numerically stable BCE (handles log-sum-exp internally)
+        bce = F.binary_cross_entropy_with_logits(logits, targets, reduction='none')
 
-        # Binary cross entropy per sample
-        bce = -targets * torch.log(p) - (1 - targets) * torch.log(1 - p)
+        # Probability for focal weighting
+        p = torch.sigmoid(logits)
 
         # p_t: probability of correct class
         p_t = targets * p + (1 - targets) * (1 - p)
@@ -169,7 +169,7 @@ class EdgeGATModel(nn.Module):
         src, dst = edge_index[0], edge_index[1]
         num_edges = src.shape[0]
         chunk = self.edge_chunk_size
-        all_preds = []
+        all_logits = []
 
         for i in range(0, num_edges, chunk):
             end = min(i + chunk, num_edges)
@@ -178,9 +178,19 @@ class EdgeGATModel(nn.Module):
             edge_feat = self.edge_transform(edge_attr[i:end])
             edge_repr = torch.cat([src_emb, dst_emb, edge_feat], dim=1)
             logits = self.classifier(edge_repr).squeeze(-1)
-            all_preds.append(torch.sigmoid(logits))
+            all_logits.append(logits)
 
-        return torch.cat(all_preds)
+        return torch.cat(all_logits)  # raw logits for training
+
+    def predict(
+        self,
+        x: torch.Tensor,
+        edge_index: torch.Tensor,
+        edge_attr: torch.Tensor,
+    ) -> torch.Tensor:
+        """Inference mode — returns probabilities (0-1)."""
+        logits = self.forward(x, edge_index, edge_attr)
+        return torch.sigmoid(logits)
 
     def get_node_embeddings(
         self,
@@ -232,7 +242,10 @@ if __name__ == "__main__":
 
     model.eval()
     with torch.no_grad():
-        preds = model(x, edge_index, edge_attr)
-    print(f"Output shape: {preds.shape}")
-    print(f"Output range: [{preds.min():.4f}, {preds.max():.4f}]")
+        logits = model(x, edge_index, edge_attr)
+        probs = model.predict(x, edge_index, edge_attr)
+    print(f"Logits shape: {logits.shape}")
+    print(f"Logits range: [{logits.min():.4f}, {logits.max():.4f}]")
+    print(f"Probs shape: {probs.shape}")
+    print(f"Probs range: [{probs.min():.4f}, {probs.max():.4f}]")
     print("\n✅ Model sanity check passed!")

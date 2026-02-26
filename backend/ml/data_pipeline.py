@@ -118,7 +118,7 @@ def compute_temporal_weight(df: pd.DataFrame) -> pd.DataFrame:
 
 # ─── 4. Build Node Features ──────────────────────────────────────────────────
 def build_node_features(
-    df: pd.DataFrame, node_map: Dict[str, int]
+    df: pd.DataFrame, node_map: Dict[str, int], train_df: pd.DataFrame = None,
 ) -> torch.Tensor:
     """
     Aggregate per-account features:
@@ -128,21 +128,24 @@ def build_node_features(
       - foreign_currency_ratio
       - cross_border_ratio
     Returns a (num_nodes × 7) float tensor, StandardScaler-normalized.
+
+    If train_df is provided, features are computed ONLY from train transactions
+    to prevent data leakage.
     """
     print("[4/6] Building node features (7 per node) ...")
+    source_df = train_df if train_df is not None else df
     num_nodes = len(node_map)
     node_feat = np.zeros((num_nodes, 7), dtype=np.float64)
 
-    # Identify foreign-currency and cross-border transactions
-    df["is_foreign_currency"] = (
-        df["Payment_currency"].astype(str) != df["Received_currency"].astype(str)
+    # ---- Sender-side aggregation (from source_df only) ----
+    source_df["is_foreign_currency"] = (
+        source_df["Payment_currency"].astype(str) != source_df["Received_currency"].astype(str)
     ).astype(int)
-    df["is_cross_border"] = (
-        df["Sender_bank_location"].astype(str) != df["Receiver_bank_location"].astype(str)
+    source_df["is_cross_border"] = (
+        source_df["Sender_bank_location"].astype(str) != source_df["Receiver_bank_location"].astype(str)
     ).astype(int)
 
-    # ---- Sender-side aggregation ----
-    sender_agg = df.groupby("Sender_account").agg(
+    sender_agg = source_df.groupby("Sender_account").agg(
         total_sent=("Amount", "sum"),
         tx_count_sent=("Amount", "count"),
         unique_receivers=("Receiver_account", "nunique"),
@@ -160,8 +163,8 @@ def build_node_features(
             node_feat[idx, 5] += row["foreign_sent"]
             node_feat[idx, 6] += row["cross_border_sent"]
 
-    # ---- Receiver-side aggregation ----
-    receiver_agg = df.groupby("Receiver_account").agg(
+    # ---- Receiver-side aggregation (from source_df only) ----
+    receiver_agg = source_df.groupby("Receiver_account").agg(
         total_received=("Amount", "sum"),
         tx_count_received=("Amount", "count"),
         unique_senders=("Sender_account", "nunique"),
@@ -222,10 +225,6 @@ def build_pyg_data(
     edge_index = torch.tensor(np.stack([src, dst], axis=0), dtype=torch.long)
 
     # ── Edge features (8 features) ──
-    # [Amount, temporal_weight,
-    #  Payment_currency_enc, Received_currency_enc,
-    #  Sender_bank_location_enc, Receiver_bank_location_enc,
-    #  Payment_type_enc, delta_t_minutes]
     edge_feat_cols = [
         "Amount",
         "temporal_weight",
@@ -238,30 +237,35 @@ def build_pyg_data(
     ]
     edge_attr_np = df[edge_feat_cols].values.astype(np.float32)
 
-    # Normalize edge features
-    edge_scaler = StandardScaler()
-    edge_attr_np = edge_scaler.fit_transform(edge_attr_np)
-    edge_attr = torch.tensor(edge_attr_np, dtype=torch.float32)
-
     # ── Edge labels ──
     y = torch.tensor(df[LABEL_COL].values, dtype=torch.float32)
 
-    # ── Node features ──
-    node_features, node_scaler = build_node_features(df, node_map)
-
-    # ── Train / Val / Test masks (edges) ──
+    # ── Train / Val / Test masks — TEMPORAL SPLIT ──
+    # Data is already sorted by Datetime (line 59)
+    # Train = earliest 70%, Val = next 15%, Test = latest 15%
     num_edges = edge_index.shape[1]
-    perm = torch.randperm(num_edges)
-    train_size = int(0.7 * num_edges)
-    val_size = int(0.15 * num_edges)
+    train_end = int(0.7 * num_edges)
+    val_end = int(0.85 * num_edges)
 
     train_mask = torch.zeros(num_edges, dtype=torch.bool)
     val_mask = torch.zeros(num_edges, dtype=torch.bool)
     test_mask = torch.zeros(num_edges, dtype=torch.bool)
 
-    train_mask[perm[:train_size]] = True
-    val_mask[perm[train_size : train_size + val_size]] = True
-    test_mask[perm[train_size + val_size :]] = True
+    train_mask[:train_end] = True
+    val_mask[train_end:val_end] = True
+    test_mask[val_end:] = True
+
+    print(f"      Temporal split: train < {df['Datetime'].iloc[train_end]} < val < {df['Datetime'].iloc[val_end]} < test")
+
+    # ── Edge features — scaler fit on TRAIN ONLY ──
+    edge_scaler = StandardScaler()
+    edge_scaler.fit(edge_attr_np[:train_end])  # fit on train edges only
+    edge_attr_np = edge_scaler.transform(edge_attr_np)  # transform all
+    edge_attr = torch.tensor(edge_attr_np, dtype=torch.float32)
+
+    # ── Node features — computed from TRAIN edges only ──
+    train_df = df.iloc[:train_end].copy()
+    node_features, node_scaler = build_node_features(df, node_map, train_df=train_df)
 
     # ── Assemble Data ──
     data = Data(

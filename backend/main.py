@@ -205,7 +205,7 @@ def run_inference(transactions: List[TransactionInput]):
     data = state.graph_data
 
     with torch.no_grad():
-        all_preds = state.model(
+        all_preds = state.model.predict(
             data.x.to(state.device),
             data.edge_index.to(state.device),
             data.edge_attr.to(state.device),
@@ -219,7 +219,7 @@ def run_inference(transactions: List[TransactionInput]):
     ], dim=1)
 
     with torch.no_grad():
-        all_preds = state.model(
+        all_preds = state.model.predict(
             data.x.to(state.device),
             combined_edge_index.to(state.device),
             combined_edge_attr.to(state.device),

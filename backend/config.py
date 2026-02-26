@@ -36,7 +36,7 @@ METRICS_PATH = _resolve("training_metrics.json")
 EPOCHS = 150
 LR = 0.0005
 WEIGHT_DECAY = 1e-5
-PATIENCE = 25
+PATIENCE = 40
 FOCAL_ALPHA = 0.90
 FOCAL_GAMMA = 2.0
 

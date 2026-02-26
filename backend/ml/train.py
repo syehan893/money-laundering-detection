@@ -110,17 +110,18 @@ def evaluate(
     model.eval()
 
     with torch.amp.autocast("cuda", enabled=(use_amp and device.type == "cuda")):
-        preds = model(
+        logits = model(
             data.x.to(device),
             data.edge_index.to(device),
             data.edge_attr.to(device),
         )
 
-    preds_masked = preds[mask].cpu().numpy()
+    # Apply sigmoid to get probabilities (model returns raw logits)
+    probs_masked = torch.sigmoid(logits[mask]).cpu().numpy()
     labels_masked = data.y[mask].cpu().numpy()
-    loss = criterion(preds[mask], data.y[mask].to(device)).item()
+    loss = criterion(logits[mask], data.y[mask].to(device)).item()
 
-    binary_preds = (preds_masked >= threshold).astype(int)
+    binary_preds = (probs_masked >= threshold).astype(int)
     precision = precision_score(labels_masked, binary_preds, zero_division=0)
     recall = recall_score(labels_masked, binary_preds, zero_division=0)
     f1 = f1_score(labels_masked, binary_preds, zero_division=0)
@@ -130,7 +131,7 @@ def evaluate(
         "precision": precision,
         "recall": recall,
         "f1": f1,
-        "preds": preds_masked,
+        "preds": probs_masked,
         "labels": labels_masked,
         "binary_preds": binary_preds,
     }
@@ -244,7 +245,7 @@ def main():
     grad_scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
     # ── Training Loop ──
-    oversample_ratio = 3.0
+    oversample_ratio = 5.0
     print(f"\n[3/5] Training (epochs={EPOCHS}, patience={PATIENCE}, AMP={'ON' if use_amp else 'OFF'}) ...\n")
     print(f"  {'Ep':>4} | {'T.Loss':>8} | {'V.Loss':>8} | {'V.P':>6} | {'V.R':>6} | {'V.F1':>6} | {'VRAM':>6} | {'Time':>5}")
     print("  " + "-" * 64)
@@ -414,7 +415,7 @@ def populate_mongodb(model, data, metrics_output, device):
 
     model.eval()
     with torch.no_grad():
-        preds = model(
+        preds = model.predict(
             data.x.to(device), data.edge_index.to(device), data.edge_attr.to(device)
         )
     preds_np = preds.cpu().numpy()
