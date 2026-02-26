@@ -13,11 +13,11 @@ data/SAML-D.csv
 data/SAML-D_original_backup.csv
 
 # Model artifacts (too large for GitHub)
-data/processed_data.pt
-data/best_model.pt
-data/encoders.pkl
-*.pt
-*.pkl
+# data/processed_data.pt
+# data/best_model.pt
+# data/encoders.pkl
+# *.pt
+# *.pkl
 
 # IDE
 .vscode/
