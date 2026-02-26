@@ -1,4 +1,4 @@
-const BASE = '/api';
+const BASE = 'http://localhost:8000/api';
 
 export async function fetchSummary() {
     const res = await fetch(`${BASE}/summary`);
