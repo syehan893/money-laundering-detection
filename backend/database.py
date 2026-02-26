@@ -19,9 +19,11 @@ from pymongo import MongoClient
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # ─── Connection ───────────────────────────────────────────────────────────────
+# MONGO_URL and MONGO_DB are injected via docker-compose environment.
+# Fallback values are for local development only.
 MONGO_URL = os.getenv(
     "MONGO_URL",
-    "mongodb://admin:Krowten200S*@syehan.xyz:27017/money-laundering-detection?authSource=admin",
+    "mongodb://localhost:27017/money-laundering-detection",
 )
 DB_NAME = os.getenv("MONGO_DB", "money-laundering-detection")
 
