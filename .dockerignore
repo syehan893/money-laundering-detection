@@ -1,0 +1,46 @@
+# Dependencies
+node_modules
+frontend/node_modules
+__pycache__
+*.pyc
+
+# Dataset (too large for Docker image)
+data/SAML-D.csv
+data/SAML-D_original_backup.csv
+SAML-D.csv
+SAML-D_original_backup.csv
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+.gemini
+
+# Docker files themselves
+docker-compose*.yml
+.dockerignore
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Legacy root files (will be cleaned up)
+model.py
+database.py
+main.py
+train.py
+data_pipeline.py
+augment_data.py
+seed_db.py
+explore_data.py
+
+# Training screenshots / mockups
+training_screenshot/
+stitch_aml_guard_*/
+
+# Frontend source (only needed in frontend Dockerfile)
+# frontend/ is used by Dockerfile.frontend via COPY

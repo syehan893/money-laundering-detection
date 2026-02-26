@@ -42,27 +42,206 @@ AML Guard is an end-to-end machine learning system that detects money laundering
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         AML Guard System                            │
-├───────────────┬────────────────────────┬────────────────────────────┤
-│   DATA LAYER  │     ML PIPELINE        │      APPLICATION LAYER     │
-├───────────────┼────────────────────────┼────────────────────────────┤
-│               │                        │                            │
-│  SAML-D.csv   │  data_pipeline.py      │  main.py (FastAPI)         │
-│  (107MB,      │  ├─ Load & Clean       │  ├─ /api/predict           │
-│   152K+ txns) │  ├─ Encode Features    │  ├─ /api/accounts          │
-│               │  ├─ Build Node Feats   │  ├─ /api/summary           │
-│  augment_     │  └─ Construct Graph    │  ├─ /api/metrics           │
-│  data.py      │                        │  └─ /api/graph-stats       │
-│  (Synthetic   │  model.py              │                            │
-│   patterns)   │  ├─ EdgeGATModel       │  frontend/ (React+Vite)    │
-│               │  └─ FocalLoss          │  ├─ Dashboard              │
-│               │                        │  ├─ Accounts               │
-│               │  train.py              │  ├─ Account Detail         │
-│               │  ├─ AMP Training       │  ├─ Model Performance      │
-│               │  ├─ Balanced Sampling  │  └─ Predict                │
-│               │  └─ Threshold Tuning   │                            │
-└───────────────┴────────────────────────┴────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            AML Guard System                                 │
+├───────────────┬──────────────────────────┬──────────────────────────────────┤
+│   DATA LAYER  │     ML PIPELINE          │      APPLICATION LAYER           │
+├───────────────┼──────────────────────────┼──────────────────────────────────┤
+│               │                          │                                  │
+│  SAML-D.csv   │  data_pipeline.py        │  main.py (FastAPI)               │
+│  (107MB,      │  ├─ Load & Clean         │  ├─ /api/predict                 │
+│   152K+ txns) │  ├─ Encode Features      │  ├─ /api/accounts                │
+│               │  ├─ Build Node Feats     │  ├─ /api/summary                 │
+│  augment_     │  └─ Construct Graph      │  ├─ /api/metrics                 │
+│  data.py      │                          │  └─ /api/graph-stats             │
+│  (Synthetic   │  model.py                │           │                      │
+│   patterns)   │  ├─ EdgeGATModel         │           ▼                      │
+│               │  └─ FocalLoss            │  ┌──────────────────┐            │
+│               │                          │  │   MongoDB         │            │
+│               │  train.py ──────────────►│  │  ├─ transactions  │            │
+│               │  ├─ AMP Training         │  │  ├─ accounts      │            │
+│               │  ├─ Balanced Sampling    │  │  ├─ metrics        │            │
+│               │  ├─ Threshold Tuning     │  │  └─ predictions    │            │
+│               │  └─ Populate MongoDB     │  └──────────────────┘            │
+│               │                          │           │                      │
+│               │                          │  frontend/ (React+Vite)          │
+│               │                          │  ├─ Dashboard                    │
+│               │                          │  ├─ Accounts                     │
+│               │                          │  ├─ Account Detail               │
+│               │                          │  ├─ Model Performance            │
+│               │                          │  └─ Predict                      │
+└───────────────┴──────────────────────────┴──────────────────────────────────┘
+```
+
+### Flow Diagrams
+
+#### 1. End-to-End System Flow
+
+```mermaid
+flowchart LR
+    subgraph DATA["📦 Data Layer"]
+        A["SAML-D.csv\n152K+ transactions"] --> B["augment_data.py"]
+        B --> C["Augmented CSV\n+ Synthetic AML Patterns"]
+    end
+
+    subgraph ML["🧠 ML Pipeline"]
+        C --> D["data_pipeline.py"]
+        D --> E["processed_data.pt\nPyG Graph Object"]
+        D --> F["encoders.pkl\nLabel Encoders"]
+        E --> G["train.py"]
+        G --> H["best_model.pt\nTrained Weights"]
+        G --> I["training_metrics.json"]
+    end
+
+    subgraph APP["🖥️ Application Layer"]
+        H --> J["main.py\nFastAPI Server"]
+        F --> J
+        E --> J
+        I --> J
+        J -->|"REST API\nport 8000"| K["frontend/\nReact Dashboard"]
+    end
+
+    style DATA fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
+    style ML fill:#1e293b,stroke:#f59e0b,color:#e2e8f0
+    style APP fill:#1e293b,stroke:#10b981,color:#e2e8f0
+```
+
+#### 2. Model Architecture Flow
+
+```mermaid
+flowchart TB
+    subgraph INPUT["Input Features"]
+        NF["Node Features\n7 dims per account\ntotal_sent, total_received,\ntx_count, partners, ratios"]
+        EF["Edge Features\n8 dims per transaction\ncategoricals + amount + weight"]
+    end
+
+    subgraph GAT["GAT Encoder"]
+        NF --> G1["GAT Layer 1\n4 heads × 64 dims"]
+        G1 --> BN1["BatchNorm + ELU + Dropout"]
+        BN1 --> G2["GAT Layer 2\n1 head × 64 dims"]
+        G2 --> BN2["BatchNorm + ELU + Dropout"]
+        BN2 --> NE["Node Embeddings\n64 dims"]
+    end
+
+    subgraph EDGE["Edge Processing"]
+        EF --> ET["Edge Transform MLP\n8 → 32 dims"]
+        NE --> SRC["Source Node Embedding"]
+        NE --> DST["Destination Node Embedding"]
+        SRC --> CAT["Concatenate\nsrc ‖ dst ‖ edge = 160 dims"]
+        DST --> CAT
+        ET --> CAT
+    end
+
+    subgraph CLASSIFY["Classification"]
+        CAT --> C1["Linear 160 → 64 + ELU"]
+        C1 --> C2["Linear 64 → 32 + ELU"]
+        C2 --> C3["Linear 32 → 1"]
+        C3 --> SIG["Sigmoid"]
+        SIG --> OUT["P(laundering)\n0.0 — 1.0"]
+    end
+
+    subgraph LOSS["Loss Function"]
+        OUT --> FL["Focal Loss\nα=0.9, γ=2.0"]
+        FL --> BP["Backpropagation"]
+    end
+
+    style INPUT fill:#0f172a,stroke:#64748b,color:#e2e8f0
+    style GAT fill:#0f172a,stroke:#3b82f6,color:#e2e8f0
+    style EDGE fill:#0f172a,stroke:#f59e0b,color:#e2e8f0
+    style CLASSIFY fill:#0f172a,stroke:#10b981,color:#e2e8f0
+    style LOSS fill:#0f172a,stroke:#ef4444,color:#e2e8f0
+```
+
+#### 3. Backend API Flow
+
+```mermaid
+flowchart TB
+    subgraph STARTUP["🚀 Server Startup"]
+        S1["Load best_model.pt"] --> S2["Load encoders.pkl"]
+        S2 --> S3["Load processed_data.pt"]
+        S3 --> S4["Load training_metrics.json"]
+        S4 --> S5["Read CSV + Run Inference"]
+        S5 --> S6["Build In-Memory Store\naccounts_df, transactions_df"]
+    end
+
+    subgraph API["📡 API Endpoints"]
+        E1["GET /api/health\nSystem status"]
+        E2["GET /api/summary\nKPIs + risk distribution"]
+        E3["GET /api/accounts\nPaginated list + filters"]
+        E4["GET /api/accounts/:id\nProfile + graph data"]
+        E5["GET /api/metrics\nTraining performance"]
+        E6["GET /api/graph-stats\nGraph structure info"]
+        E7["POST /api/predict\nReal-time prediction"]
+    end
+
+    subgraph PROCESS["⚙️ Request Processing"]
+        S6 --> E1
+        S6 --> E2
+        S6 --> E3
+        S6 --> E4
+        S6 --> E5
+        S6 --> E6
+        E7 --> P1["Encode Features"]
+        P1 --> P2["Model Forward Pass"]
+        P2 --> P3["Risk Classification"]
+        P3 --> P4["JSON Response"]
+    end
+
+    style STARTUP fill:#0f172a,stroke:#3b82f6,color:#e2e8f0
+    style API fill:#0f172a,stroke:#10b981,color:#e2e8f0
+    style PROCESS fill:#0f172a,stroke:#f59e0b,color:#e2e8f0
+```
+
+#### 4. Frontend Dashboard Flow
+
+```mermaid
+flowchart TB
+    subgraph ENTRY["App Entry"]
+        M["main.jsx\nReact Root"] --> APP["App.jsx\nRouter + Sidebar Layout"]
+    end
+
+    subgraph PAGES["📄 Pages"]
+        APP --> D["Dashboard /"]
+        APP --> AC["Accounts /accounts"]
+        APP --> AD["Account Detail /accounts/:id"]
+        APP --> MP["Model Performance /model"]
+        APP --> PR["Predict /predict"]
+    end
+
+    subgraph DASHBOARD["Dashboard Components"]
+        D --> D1["KPI Cards\nAccounts, Transactions, Flagged, F1"]
+        D --> D2["Risk Distribution\nDonut Chart"]
+        D --> D3["Currency Stats\nBar Chart"]
+        D --> D4["Flagged Accounts\nData Table"]
+    end
+
+    subgraph ACCOUNT_DETAIL["Account Detail Components"]
+        AD --> AD1["Profile Card\nRisk Gauge + Stats"]
+        AD --> AD2["Transaction History\nSortable Table"]
+        AD --> AD3["Network Graph\nForce-Directed Canvas\nDirected Arrows + Tooltips"]
+    end
+
+    subgraph MODEL_PAGE["Model Performance Components"]
+        MP --> MP1["Metric Cards\nPrecision, Recall, F1, Accuracy"]
+        MP --> MP2["Training History\nLine Chart with connectNulls"]
+        MP --> MP3["Confusion Matrix\n2×2 Grid"]
+        MP --> MP4["Hyperparameters\nTable"]
+    end
+
+    subgraph API_LAYER["🔌 API Layer"]
+        API["api.js\nfetch wrapper"] -->|"GET /api/summary"| D
+        API -->|"GET /api/accounts"| AC
+        API -->|"GET /api/accounts/:id"| AD
+        API -->|"GET /api/metrics"| MP
+        API -->|"POST /api/predict"| PR
+    end
+
+    style ENTRY fill:#0f172a,stroke:#64748b,color:#e2e8f0
+    style PAGES fill:#0f172a,stroke:#3b82f6,color:#e2e8f0
+    style DASHBOARD fill:#0f172a,stroke:#10b981,color:#e2e8f0
+    style ACCOUNT_DETAIL fill:#0f172a,stroke:#f59e0b,color:#e2e8f0
+    style MODEL_PAGE fill:#0f172a,stroke:#a855f7,color:#e2e8f0
+    style API_LAYER fill:#0f172a,stroke:#ef4444,color:#e2e8f0
 ```
 
 ---
@@ -74,11 +253,12 @@ AML Guard is an end-to-end machine learning system that detects money laundering
 | **ML Framework**  | PyTorch + PyTorch Geometric   | Graph neural network training & inference         |
 | **Model**         | GAT (Graph Attention Network) | Edge-level binary classification                  |
 | **Loss Function** | Focal Loss (α=0.9, γ=2.0)   | Handling extreme class imbalance (~0.5% positive) |
+| **Database**      | MongoDB (pymongo + motor)     | Persistent storage for accounts, transactions     |
 | **Backend**       | FastAPI + Uvicorn             | REST API serving predictions & data               |
 | **Frontend**      | React 18 + Vite               | Interactive monitoring dashboard                  |
 | **Charts**        | Recharts                      | Training history, risk distribution charts        |
 | **Styling**       | Vanilla CSS (Glassmorphism)   | Dark theme with frosted glass cards               |
-| **Data**          | Pandas + NumPy                | In-memory data processing                         |
+| **Data**          | Pandas + NumPy                | Data processing                                   |
 
 ---
 
@@ -87,37 +267,57 @@ AML Guard is an end-to-end machine learning system that detects money laundering
 ```
 money-laundering-detection/
 │
-├── SAML-D.csv                    # Transaction dataset (107MB, 152K+ rows)
-├── processed_data.pt             # PyTorch Geometric graph object
-├── best_model.pt                 # Trained EdgeGATModel weights
-├── encoders.pkl                  # Fitted LabelEncoders for categorical features
-├── training_metrics.json         # Training history & test performance
+├── backend/                      # Python package — all backend logic
+│   ├── __init__.py
+│   ├── main.py                   # FastAPI REST API server
+│   ├── database.py               # MongoDB connection (sync + async)
+│   ├── config.py                 # Centralized paths & hyperparameters
+│   ├── ml/                       # Machine learning components
+│   │   ├── __init__.py
+│   │   ├── model.py              # EdgeGATModel + FocalLoss
+│   │   ├── train.py              # Training & evaluation pipeline
+│   │   └── data_pipeline.py      # CSV → PyG graph construction
+│   └── scripts/                  # Utility scripts
+│       ├── augment_data.py       # Synthetic laundering injection
+│       ├── seed_db.py            # (Legacy) DB seeder
+│       └── explore_data.py       # Data verification
 │
-├── data_pipeline.py              # Step 1: CSV → PyG graph construction
-├── augment_data.py               # Step 1b: Synthetic laundering injection
-├── model.py                      # Step 2: EdgeGATModel + FocalLoss
-├── train.py                      # Step 3: Training & evaluation pipeline
-├── main.py                       # Step 4: FastAPI REST API server
+├── data/                         # Data & model artifacts
+│   ├── SAML-D.csv                # Transaction dataset (107MB, 152K+ rows)
+│   ├── processed_data.pt         # PyTorch Geometric graph object
+│   ├── best_model.pt             # Trained EdgeGATModel weights
+│   ├── encoders.pkl              # Fitted LabelEncoders
+│   └── training_metrics.json     # Training history & test performance
 │
-├── frontend/                     # Step 5: React dashboard
-│   ├── index.html
+├── frontend/                     # React dashboard (Vite + Recharts)
+│   ├── src/
+│   │   ├── main.jsx              # React entry point
+│   │   ├── App.jsx               # Router + sidebar layout
+│   │   ├── api.js                # API client functions
+│   │   ├── index.css             # Design system (tokens + components)
+│   │   └── pages/
+│   │       ├── Dashboard.jsx     # KPIs, risk donut, currency bars
+│   │       ├── Accounts.jsx      # Filterable & paginated account list
+│   │       ├── AccountDetail.jsx # Profile, transactions, network graph
+│   │       ├── ModelPerformance.jsx  # Metrics, training chart
+│   │       └── Predict.jsx       # Transaction risk prediction form
 │   ├── package.json
-│   ├── vite.config.js
-│   └── src/
-│       ├── main.jsx              # React entry point
-│       ├── App.jsx               # Router + sidebar layout
-│       ├── api.js                # API client functions
-│       ├── index.css             # Design system (tokens + components)
-│       └── pages/
-│           ├── Dashboard.jsx     # KPIs, risk donut, currency bars, flagged table
-│           ├── Accounts.jsx      # Filterable & paginated account list
-│           ├── AccountDetail.jsx # Account profile, transactions, network graph
-│           ├── ModelPerformance.jsx  # Metrics, training chart, confusion matrix
-│           └── Predict.jsx       # Transaction risk prediction form
+│   └── vite.config.js
 │
-├── database.py                   # (Legacy) MongoDB connection utilities
-├── seed_db.py                    # (Legacy) Database seeding script
-└── explore_data.py               # Data exploration utilities
+├── docker/                       # Deployment configuration
+│   ├── Dockerfile.backend
+│   ├── Dockerfile.frontend
+│   └── nginx.conf
+│
+├── docs/                         # Documentation & media
+│   ├── FLOW.md                   # System flow diagrams
+│   ├── screenshots/              # Training screenshots
+│   └── mockups/                  # UI mockups
+│
+├── docker-compose.yml            # Container orchestration
+├── requirements.txt              # Python dependencies
+├── README.md                     # This file
+└── .gitignore
 ```
 
 ---
@@ -166,7 +366,7 @@ money-laundering-detection/
 
 ### Step 1 — Data Preprocessing & Graph Construction
 
-**File:** `data_pipeline.py`
+**File:** `backend/ml/data_pipeline.py`
 
 ```
 CSV (152K rows) → Clean → Encode → Build Graph → PyG Data Object
@@ -189,17 +389,17 @@ CSV (152K rows) → Clean → Encode → Build Graph → PyG Data Object
    - 5 encoded categoricals + amount + temporal weight + is_laundering label
 6. **Build PyG Data** — `torch_geometric.data.Data` with train/val/test masks (70/15/15 split)
 
-**Output:** `processed_data.pt` (65MB), `encoders.pkl` (5.5MB)
+**Output:** `data/processed_data.pt` (65MB), `data/encoders.pkl` (5.5MB)
 
 ```bash
-python data_pipeline.py
+python -m backend.ml.data_pipeline
 ```
 
 ---
 
 ### Step 2 — Model Architecture
 
-**File:** `model.py`
+**File:** `backend/ml/model.py`
 
 #### EdgeGATModel
 
@@ -240,7 +440,7 @@ FL(p_t) = -α_t · (1 - p_t)^γ · log(p_t)
 
 ### Step 3 — Training Pipeline
 
-**File:** `train.py`
+**File:** `backend/ml/train.py`
 
 **Optimized for:** RTX 3060 (6GB VRAM) + 16GB RAM
 
@@ -268,28 +468,33 @@ FL(p_t) = -α_t · (1 - p_t)^γ · log(p_t)
 | Epochs Trained    | 61     |
 
 ```bash
-python train.py
+python -m backend.ml.train
 ```
 
-**Output:** `best_model.pt` (144KB), `training_metrics.json` (21KB)
+**Output:** `data/best_model.pt` (144KB), `data/training_metrics.json` (21KB)
+
+After training completes, `train.py` also **populates MongoDB** with:
+- `transactions` — 152K+ documents with prediction scores
+- `accounts` — 52K+ account profiles with risk scores
+- `training_metrics` — Training results snapshot
 
 ---
 
 ### Step 4 — API Server
 
-**File:** `main.py`
+**File:** `backend/main.py`
 
-FastAPI backend serving model predictions and data analysis endpoints. Runs entirely **in-memory** — no database required. On startup, it:
+FastAPI backend serving model predictions and data analysis endpoints. Reads all data from **MongoDB** (populated by `train.py`). On startup, it:
 
-1. Loads the trained model (`best_model.pt`)
-2. Loads label encoders (`encoders.pkl`)
-3. Loads graph data (`processed_data.pt`)
-4. Loads training metrics (`training_metrics.json`)
-5. Reads the CSV, runs model inference on all transactions, and builds in-memory account profiles
+1. Loads the trained model (`data/best_model.pt`) — only for `/api/predict`
+2. Loads label encoders (`data/encoders.pkl`) — only for `/api/predict`
+3. Loads graph data (`data/processed_data.pt`) — only for `/api/graph-stats`
+4. Connects to MongoDB — serves all GET endpoints from DB
 
 ```bash
-python main.py
-# Server starts at http://localhost:8000
+python -m backend.main
+# ✅ Server running at http://localhost:8000
+# 📖 Swagger docs at http://localhost:8000/docs
 ```
 
 ---
@@ -337,7 +542,7 @@ Health check endpoint.
 {
   "status": "healthy",
   "model_loaded": true,
-  "data_loaded": true,
+  "database_connected": true,
   "accounts_count": 52463,
   "transactions_count": 152564
 }
@@ -591,6 +796,7 @@ Predict laundering risk for new transactions.
 
 - **Python** 3.9+
 - **Node.js** 18+ and npm
+- **MongoDB** 5.0+ (remote or local)
 - **CUDA** (optional, for GPU training)
 
 ### 1. Install Python Dependencies
@@ -598,25 +804,26 @@ Predict laundering risk for new transactions.
 ```bash
 pip install torch torchvision torch-geometric
 pip install fastapi uvicorn pandas numpy scikit-learn joblib
+pip install pymongo motor
 ```
 
 ### 2. Run the ML Pipeline (Optional — pre-trained model included)
 
 ```bash
 # Step 1: Data augmentation (optional)
-python augment_data.py
+python -m backend.scripts.augment_data
 
 # Step 2: Build graph from CSV
-python data_pipeline.py
+python -m backend.ml.data_pipeline
 
-# Step 3: Train the model
-python train.py
+# Step 3: Train the model + populate MongoDB
+python -m backend.ml.train
 ```
 
 ### 3. Start the API Server
 
 ```bash
-python main.py
+python -m backend.main
 # ✅ Server running at http://localhost:8000
 # 📖 Swagger docs at http://localhost:8000/docs
 ```
@@ -628,6 +835,15 @@ cd frontend
 npm install
 npm run dev
 # ✅ Dashboard at http://localhost:5173
+```
+
+### 5. Docker Deployment (Optional)
+
+```bash
+docker compose up -d --build
+# MongoDB:  localhost:27017
+# Backend:  localhost:8000
+# Frontend: localhost:80
 ```
 
 ---

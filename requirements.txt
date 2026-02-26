@@ -1,0 +1,22 @@
+# ── Requirements for Backend Docker ──
+# PyTorch CPU-only (smaller image, no CUDA needed for inference)
+torch==2.5.1+cpu
+torchvision==0.20.1+cpu
+torch-geometric==2.6.1
+
+# API
+fastapi==0.115.6
+uvicorn==0.34.0
+
+# Data
+pandas==2.2.3
+numpy==2.2.1
+scikit-learn==1.6.1
+joblib==1.4.2
+
+# MongoDB
+pymongo==4.11.3
+motor==3.7.0
+
+# Extra
+--extra-index-url https://download.pytorch.org/whl/cpu

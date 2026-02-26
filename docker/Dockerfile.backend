@@ -1,0 +1,31 @@
+# ── Backend Dockerfile (FastAPI + PyTorch CPU) ──
+# Build context should be project root (money-laundering-detection/)
+
+FROM python:3.11-slim AS base
+
+WORKDIR /app
+
+# Install system deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc g++ && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Python deps
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy backend package
+COPY backend/ ./backend/
+
+# Copy model artifacts (from data/ or root — whichever exists)
+COPY data/ ./data/
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')" || exit 1
+
+# Run server
+CMD ["python", "-m", "backend.main"]

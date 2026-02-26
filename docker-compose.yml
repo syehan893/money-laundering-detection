@@ -1,0 +1,66 @@
+# ══════════════════════════════════════════════════════════════════
+#  AML Guard — Docker Compose
+# ══════════════════════════════════════════════════════════════════
+#  3 containers: MongoDB + Backend (FastAPI) + Frontend (Nginx)
+#
+#  Usage:
+#    docker compose up -d --build
+#    docker compose logs -f
+#    docker compose down
+# ══════════════════════════════════════════════════════════════════
+
+services:
+  # ── MongoDB ──────────────────────────────────────────────────────
+  mongodb:
+    image: mongo:7
+    container_name: aml-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: Krowten200S*
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Backend (FastAPI) ────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: aml-backend
+    restart: unless-stopped
+    environment:
+      - MONGO_URL=mongodb://admin:Krowten200S*@mongodb:27017/money-laundering-detection?authSource=admin
+      - MONGO_DB=money-laundering-detection
+    ports:
+      - "8000:8000"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+  # ── Frontend (React + Nginx) ─────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    container_name: aml-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  mongodb_data:

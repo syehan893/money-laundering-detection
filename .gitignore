@@ -2,8 +2,38 @@
 node_modules/
 frontend/node_modules/
 
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
 # Dataset files (too large for GitHub)
 *.csv
+data/SAML-D.csv
+data/SAML-D_original_backup.csv
 
-# Screenshots (optional - remove this line if you want to include them)
+# Model artifacts (too large for GitHub)
+data/processed_data.pt
+data/best_model.pt
+data/encoders.pkl
+*.pt
+*.pkl
+
+# IDE
+.vscode/
+.idea/
+.gemini/
+
+# Environment
+.env
+venv/
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Screenshots / mockups (optional)
 images_screenshot/
+training_screenshot/
+stitch_aml_guard_*/
