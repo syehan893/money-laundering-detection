@@ -26,7 +26,12 @@ def _resolve(filename: str) -> str:
 
 
 # ─── Data Paths ───────────────────────────────────────────────────────────────
-CSV_PATH = _resolve("SAML-D.csv")
+# Main CSV (used by populate_mongodb and fallback single-file pipeline)
+CSV_PATH = _resolve("SAML-D_large.csv")
+# Pre-split CSVs (used by data_pipeline when available)
+TRAIN_CSV_PATH = _resolve("train.csv")
+VAL_CSV_PATH = _resolve("val.csv")
+TEST_CSV_PATH = _resolve("test.csv")
 DATA_PATH = _resolve("processed_data.pt")
 MODEL_PATH = _resolve("best_model.pt")
 ENCODERS_PATH = _resolve("encoders.pkl")
@@ -39,6 +44,13 @@ WEIGHT_DECAY = 1e-5
 PATIENCE = 40
 FOCAL_ALPHA = 0.90
 FOCAL_GAMMA = 2.0
+
+# ─── Data Split Sizes ─────────────────────────────────────────────────────────
+# Override default 70/15/15 temporal split with absolute counts.
+# Set to None to use default percentage-based split.
+TRAIN_SIZE = 500_000   # 500K training edges
+TEST_SIZE = 500_000    # 500K test edges
+# Validation size is auto-calculated: total - train - test
 
 # ─── Model Architecture ──────────────────────────────────────────────────────
 NODE_FEAT_DIM = 7

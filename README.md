@@ -57,11 +57,11 @@ AML Guard is an end-to-end machine learning system that detects money laundering
 │  (Synthetic   │  model.py                │           │                      │
 │   patterns)   │  ├─ EdgeGATModel         │           ▼                      │
 │               │  └─ FocalLoss            │  ┌──────────────────┐            │
-│               │                          │  │   MongoDB         │            │
-│               │  train.py ──────────────►│  │  ├─ transactions  │            │
-│               │  ├─ AMP Training         │  │  ├─ accounts      │            │
-│               │  ├─ Balanced Sampling    │  │  ├─ metrics        │            │
-│               │  ├─ Threshold Tuning     │  │  └─ predictions    │            │
+│               │                          │  │   MongoDB        │            │
+│               │  train.py ──────────────►│  │  ├─ transactions │            │
+│               │  ├─ AMP Training         │  │  ├─ accounts     │            │
+│               │  ├─ Balanced Sampling    │  │  ├─ metrics      │            │
+│               │  ├─ Threshold Tuning     │  │  └─ predictions  │            │
 │               │  └─ Populate MongoDB     │  └──────────────────┘            │
 │               │                          │           │                      │
 │               │                          │  frontend/ (React+Vite)          │
@@ -474,6 +474,7 @@ python -m backend.ml.train
 **Output:** `data/best_model.pt` (144KB), `data/training_metrics.json` (21KB)
 
 After training completes, `train.py` also **populates MongoDB** with:
+
 - `transactions` — 152K+ documents with prediction scores
 - `accounts` — 52K+ account profiles with risk scores
 - `training_metrics` — Training results snapshot

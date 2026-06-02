@@ -465,17 +465,17 @@ export default function AccountDetail() {
                                 <div className="stat-label">Total Received</div>
                                 <div className="stat-value">{formatMoney(acc.total_received)}</div>
                             </div>
-                            <div className="stat-box">
+                            {/* <div className="stat-box">
                                 <div className="stat-label">TX Count</div>
                                 <div className="stat-value">{(txSummary.total || 0).toLocaleString()}</div>
-                            </div>
+                            </div> */}
                             <div className="stat-box">
                                 <div className="stat-label">Partners</div>
                                 <div className="stat-value">{acc.unique_partners || '—'}</div>
                             </div>
                         </div>
 
-                        <div className="ratio-row">
+                        {/* <div className="ratio-row">
                             <div className="ratio-box">
                                 <span className="ratio-label">Cross-border Ratio</span>
                                 <span className="ratio-value">{acc.cross_border_ratio != null ? Number(acc.cross_border_ratio).toFixed(2) : '—'}</span>
@@ -484,7 +484,7 @@ export default function AccountDetail() {
                                 <span className="ratio-label">Foreign Currency Ratio</span>
                                 <span className="ratio-value">{acc.foreign_currency_ratio != null ? Number(acc.foreign_currency_ratio).toFixed(2) : '—'}</span>
                             </div>
-                        </div>
+                        </div> */}
                     </div>
 
                     {/* Transaction History */}

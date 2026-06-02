@@ -28,7 +28,6 @@ function Sidebar() {
                 </div>
                 <div>
                     <h1>AML Guard</h1>
-                    <p>Enterprise Edition</p>
                 </div>
             </div>
 

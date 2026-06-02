@@ -22,7 +22,10 @@ from torch_geometric.data import Data
 
 # Add project root to path for config import
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from backend.config import CSV_PATH, DATA_DIR
+from backend.config import (
+    CSV_PATH, DATA_DIR, TRAIN_SIZE, TEST_SIZE,
+    TRAIN_CSV_PATH, VAL_CSV_PATH, TEST_CSV_PATH,
+)
 
 warnings.filterwarnings("ignore")
 
@@ -73,6 +76,50 @@ def load_and_clean_csv(path: str) -> pd.DataFrame:
     df[LABEL_COL] = df[LABEL_COL].astype(int)
 
     print(f"      Cleaned shape: {df.shape}")
+    return df
+
+
+def load_split_csvs() -> pd.DataFrame:
+    """
+    Load train.csv, val.csv, test.csv as pre-split files.
+    Concatenates them and marks each row with its split origin.
+    Returns a DataFrame with a '_split' column ('train'/'val'/'test').
+    """
+    print("[1/6] Loading pre-split CSV files ...")
+    print(f"      Train: {TRAIN_CSV_PATH}")
+    print(f"      Val:   {VAL_CSV_PATH}")
+    print(f"      Test:  {TEST_CSV_PATH}")
+
+    dfs = []
+    for split_name, path in [("train", TRAIN_CSV_PATH), ("val", VAL_CSV_PATH), ("test", TEST_CSV_PATH)]:
+        df = pd.read_csv(path)
+        df["_split"] = split_name
+        dfs.append(df)
+        print(f"      {split_name:>6}: {len(df):,} rows")
+
+    df = pd.concat(dfs, ignore_index=True)
+
+    # Parse datetime (already sorted per file, concat preserves order)
+    df["Datetime"] = pd.to_datetime(
+        df["Date"].astype(str) + " " + df["Time"].astype(str),
+        format="%Y-%m-%d %H:%M:%S",
+        errors="coerce",
+    )
+
+    # Drop rows with missing critical fields
+    critical_cols = ["Sender_account", "Receiver_account", "Amount", LABEL_COL]
+    before = len(df)
+    df = df.dropna(subset=critical_cols).reset_index(drop=True)
+    dropped = before - len(df)
+    if dropped > 0:
+        print(f"      Dropped {dropped} rows with missing critical fields.")
+
+    df["Sender_account"] = df["Sender_account"].astype(str)
+    df["Receiver_account"] = df["Receiver_account"].astype(str)
+    df["Amount"] = df["Amount"].astype(float)
+    df[LABEL_COL] = df[LABEL_COL].astype(int)
+
+    print(f"      Combined: {df.shape}")
     return df
 
 
@@ -240,22 +287,38 @@ def build_pyg_data(
     # ── Edge labels ──
     y = torch.tensor(df[LABEL_COL].values, dtype=torch.float32)
 
-    # ── Train / Val / Test masks — TEMPORAL SPLIT ──
-    # Data is already sorted by Datetime (line 59)
-    # Train = earliest 70%, Val = next 15%, Test = latest 15%
+    # ── Train / Val / Test masks ──
     num_edges = edge_index.shape[1]
-    train_end = int(0.7 * num_edges)
-    val_end = int(0.85 * num_edges)
 
-    train_mask = torch.zeros(num_edges, dtype=torch.bool)
-    val_mask = torch.zeros(num_edges, dtype=torch.bool)
-    test_mask = torch.zeros(num_edges, dtype=torch.bool)
+    # Check if using pre-split files (has '_split' column)
+    if "_split" in df.columns:
+        print("      Using pre-split files (train.csv / val.csv / test.csv)")
+        train_mask = torch.tensor(df["_split"].values == "train", dtype=torch.bool)
+        val_mask = torch.tensor(df["_split"].values == "val", dtype=torch.bool)
+        test_mask = torch.tensor(df["_split"].values == "test", dtype=torch.bool)
+        train_end = int(train_mask.sum())
+        val_end = train_end + int(val_mask.sum())
+        print(f"      Split: train={train_end:,} | val={int(val_mask.sum()):,} | test={int(test_mask.sum()):,}")
+    else:
+        # Temporal split — use absolute counts from config if set
+        if TRAIN_SIZE is not None and TEST_SIZE is not None and num_edges >= (TRAIN_SIZE + TEST_SIZE):
+            train_end = TRAIN_SIZE
+            val_end = num_edges - TEST_SIZE
+            print(f"      Using absolute split: train={TRAIN_SIZE:,} | val={val_end - train_end:,} | test={TEST_SIZE:,}")
+        else:
+            train_end = int(0.7 * num_edges)
+            val_end = int(0.85 * num_edges)
+            print(f"      Using default 70/15/15 split")
 
-    train_mask[:train_end] = True
-    val_mask[train_end:val_end] = True
-    test_mask[val_end:] = True
+        train_mask = torch.zeros(num_edges, dtype=torch.bool)
+        val_mask = torch.zeros(num_edges, dtype=torch.bool)
+        test_mask = torch.zeros(num_edges, dtype=torch.bool)
 
-    print(f"      Temporal split: train < {df['Datetime'].iloc[train_end]} < val < {df['Datetime'].iloc[val_end]} < test")
+        train_mask[:train_end] = True
+        val_mask[train_end:val_end] = True
+        test_mask[val_end:] = True
+
+        print(f"      Temporal split: train < {df['Datetime'].iloc[train_end]} < val < {df['Datetime'].iloc[val_end]} < test")
 
     # ── Edge features — scaler fit on TRAIN ONLY ──
     edge_scaler = StandardScaler()
@@ -264,7 +327,10 @@ def build_pyg_data(
     edge_attr = torch.tensor(edge_attr_np, dtype=torch.float32)
 
     # ── Node features — computed from TRAIN edges only ──
-    train_df = df.iloc[:train_end].copy()
+    if "_split" in df.columns:
+        train_df = df[df["_split"] == "train"].copy()
+    else:
+        train_df = df.iloc[:train_end].copy()
     node_features, node_scaler = build_node_features(df, node_map, train_df=train_df)
 
     # ── Assemble Data ──
@@ -351,8 +417,16 @@ def main():
     print("║  AML Detection — Data Pipeline (Step 1)                 ║")
     print("╚══════════════════════════════════════════════════════════╝\n")
 
-    # Step 1: Load CSV
-    df = load_and_clean_csv(CSV_PATH)
+    # Step 1: Load CSV — prefer pre-split files if they exist
+    split_files_exist = (
+        os.path.exists(TRAIN_CSV_PATH)
+        and os.path.exists(VAL_CSV_PATH)
+        and os.path.exists(TEST_CSV_PATH)
+    )
+    if split_files_exist:
+        df = load_split_csvs()
+    else:
+        df = load_and_clean_csv(CSV_PATH)
 
     # Step 2: Encode categoricals
     df, encoders = encode_categorical_features(df)

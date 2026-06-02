@@ -1,0 +1,14 @@
+{
+  "Normal": {
+    "Low": 223404,
+    "Moderate": 205826,
+    "High": 218,
+    "Critical": 186
+  },
+  "Laundering": {
+    "Low": 107,
+    "Moderate": 188,
+    "High": 1,
+    "Critical": 70070
+  }
+}

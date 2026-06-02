@@ -8,6 +8,7 @@ __pycache__/
 *.pyo
 
 # Dataset files (too large for GitHub)
+*.pptx
 *.csv
 data/SAML-D.csv
 data/SAML-D_original_backup.csv

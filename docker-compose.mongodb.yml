@@ -1,0 +1,33 @@
+# ══════════════════════════════════════════════════════════════════
+#  AML Guard — MongoDB Standalone (Local Development)
+# ══════════════════════════════════════════════════════════════════
+#  Jalankan MongoDB saja untuk development lokal tanpa backend/frontend.
+#  Backend dapat connect ke localhost:27017
+#
+#  Usage:
+#    docker compose -f docker-compose.mongodb.yml up -d
+#    docker compose -f docker-compose.mongodb.yml down
+# ══════════════════════════════════════════════════════════════════
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: aml-mongodb-local
+    restart: unless-stopped
+    # No authentication for local development — simplifies connection
+    # For production, enable auth and set strong credentials
+    # environment:
+    #   MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-admin}
+    #   MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASS:-admin123}
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mongodb_data:

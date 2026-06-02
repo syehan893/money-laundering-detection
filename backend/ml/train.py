@@ -22,6 +22,9 @@ import time
 from datetime import datetime
 from typing import Dict
 
+# Reduce CUDA memory fragmentation (helpful for RTX 3060 with large graphs)
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 import joblib
 import pandas as pd
 
@@ -40,7 +43,10 @@ from sklearn.metrics import (
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from backend.ml.model import EdgeGATModel, FocalLoss, count_parameters, get_risk_category
-from backend.config import DATA_PATH, MODEL_PATH, METRICS_PATH, CSV_PATH, ENCODERS_PATH
+from backend.config import (
+    DATA_PATH, MODEL_PATH, METRICS_PATH, CSV_PATH, ENCODERS_PATH,
+    TRAIN_CSV_PATH, VAL_CSV_PATH, TEST_CSV_PATH,
+)
 from backend.config import EPOCHS, LR, WEIGHT_DECAY, PATIENCE, FOCAL_ALPHA, FOCAL_GAMMA
 
 # ─── Resource Limits (keep PC responsive) ────────────────────────────────────
@@ -57,9 +63,9 @@ def get_device() -> torch.device:
         total_mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
         print(f"  GPU: {gpu_name} ({total_mem:.1f} GB VRAM)")
 
-        # Cap VRAM at 80% → leaves ~1.2GB for Windows + display
-        torch.cuda.set_per_process_memory_fraction(0.80, 0)
-        print(f"  VRAM limit: {total_mem * 0.80:.1f} GB (80%)")
+        # Cap VRAM at 95% → leaves ~400MB for OS, most available for training
+        torch.cuda.set_per_process_memory_fraction(0.95, 0)
+        print(f"  VRAM limit: {total_mem * 0.95:.1f} GB (95%)")
         print(f"  Mixed precision (AMP): ENABLED")
     else:
         device = torch.device("cpu")
@@ -217,6 +223,12 @@ def main():
     num_neg = int(data.y.shape[0]) - num_pos
     print(f"  Class 0: {num_neg:,} | Class 1: {num_pos:,} | Ratio: {num_neg/max(num_pos,1):.1f}:1")
 
+    # Print split sizes
+    train_sz = int(data.train_mask.sum().item())
+    val_sz = int(data.val_mask.sum().item())
+    test_sz = int(data.test_mask.sum().item())
+    print(f"  Split sizes: train={train_sz:,} | val={val_sz:,} | test={test_sz:,}")
+
     # ── Device ──
     device = get_device()
     use_amp = device.type == "cuda"
@@ -235,6 +247,8 @@ def main():
     if device.type == "cuda":
         mem_alloc = torch.cuda.memory_allocated() / (1024**2)
         print(f"  VRAM after model load: {mem_alloc:.0f} MB")
+        torch.cuda.empty_cache()
+        print("  ✓ CUDA cache cleared before training")
 
     # ── Loss, Optimizer, AMP Scaler ──
     criterion = FocalLoss(alpha=FOCAL_ALPHA, gamma=FOCAL_GAMMA).to(device)
@@ -300,11 +314,10 @@ def main():
                 print(f"\n  ⏹ Early stopping at epoch {epoch} (best: {best_epoch})")
                 break
 
-        # Memory cleanup every 10 epochs
-        if epoch % 10 == 0:
-            gc.collect()
-            if device.type == "cuda":
-                torch.cuda.empty_cache()
+        # Memory cleanup every epoch (critical for large graphs on 8GB VRAM)
+        gc.collect()
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
 
     print(f"\n  ✓ Best Val F1: {best_val_f1:.4f} at epoch {best_epoch}")
 
@@ -406,7 +419,16 @@ def populate_mongodb(model, data, metrics_output, device):
 
     # ── 1) Load CSV + run inference ──
     print("  🔄 Loading CSV and running inference ...")
-    df = pd.read_csv(CSV_PATH)
+    # Prefer full dataset; fallback to split files merged together
+    if os.path.exists(CSV_PATH):
+        df = pd.read_csv(CSV_PATH)
+    else:
+        # Merge split files if full dataset not available
+        dfs = []
+        for split_path in [TRAIN_CSV_PATH, VAL_CSV_PATH, TEST_CSV_PATH]:
+            if os.path.exists(split_path):
+                dfs.append(pd.read_csv(split_path))
+        df = pd.concat(dfs, ignore_index=True)
     df["datetime"] = pd.to_datetime(
         df["Date"].astype(str) + " " + df["Time"].astype(str),
         format="%Y-%m-%d %H:%M:%S", errors="coerce",
