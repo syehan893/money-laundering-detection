@@ -1,0 +1,26 @@
+{
+  "metode": "XGBoost",
+  "threshold": 0.4107053875923157,
+  "threshold_dipilih_pada": "validation",
+  "kriteria_ambang": "minimum FP+FN",
+  "confusion_matrix": {
+    "tn": 420813,
+    "fp": 53,
+    "fn": 95,
+    "tp": 68176
+  },
+  "metrik": {
+    "precision": 0.9992232042093538,
+    "recall": 0.9986084867659768,
+    "f1": 0.9989157509157509,
+    "accuracy": 0.9996974262834338,
+    "fpr": 0.0001259308188354488,
+    "fnr": 0.001391513234023231
+  },
+  "validation": {
+    "tn": 187008,
+    "fp": 28,
+    "fn": 44,
+    "tp": 30980
+  }
+}

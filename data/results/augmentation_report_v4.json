@@ -1,0 +1,71 @@
+{
+  "sumber": "SAML-D_original_backup.csv",
+  "keluaran": "SAML-D_v4.csv",
+  "pola": {
+    "Fan_Out": {
+      "asli_dipertahankan": 92,
+      "sintetis_ditambahkan": 33908,
+      "total": 34000,
+      "instance_pola": 1630
+    },
+    "Fan_In": {
+      "asli_dipertahankan": 67,
+      "sintetis_ditambahkan": 33933,
+      "total": 34000,
+      "instance_pola": 1622
+    },
+    "Scatter_Gather": {
+      "asli_dipertahankan": 89,
+      "sintetis_ditambahkan": 33911,
+      "total": 34000,
+      "instance_pola": 1205
+    },
+    "Gather_Scatter": {
+      "asli_dipertahankan": 31,
+      "sintetis_ditambahkan": 33969,
+      "total": 34000,
+      "instance_pola": 1302
+    },
+    "Simple_Cycle": {
+      "asli_dipertahankan": 16,
+      "sintetis_ditambahkan": 33984,
+      "total": 34000,
+      "instance_pola": 6170
+    }
+  },
+  "laundering_luar_lingkup_dikeluarkan": 627,
+  "normal_tambahan": 14482,
+  "split": {
+    "train": {
+      "baris": 489143,
+      "laundering": 70705,
+      "rasio_persen": 14.45
+    },
+    "val": {
+      "baris": 218060,
+      "laundering": 31024,
+      "rasio_persen": 14.23
+    },
+    "test": {
+      "baris": 489137,
+      "laundering": 68271,
+      "rasio_persen": 13.96
+    }
+  },
+  "total_baris": 1196340,
+  "total_laundering": 170000,
+  "rasio_persen": 14.21,
+  "verifikasi_atribut": {
+    "proporsi_dasar": 0.1421,
+    "penyimpangan": [
+      {
+        "kolom": "Sender_bank_location",
+        "nilai": "Mexico",
+        "proporsi_laundering": 0.2235,
+        "rasio_thd_dasar": 1.57,
+        "jumlah": 2040
+      }
+    ]
+  },
+  "seed": 42
+}

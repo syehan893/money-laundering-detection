@@ -59,7 +59,7 @@ services:
     container_name: aml-frontend
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT}:80"
+      - "${FRONTEND_PORT}:3000"
     depends_on:
       - backend
 

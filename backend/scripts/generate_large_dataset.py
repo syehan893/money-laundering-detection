@@ -23,14 +23,14 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from backend.config import CSV_PATH, DATA_DIR
+from backend.config import CSV_PATH, DATA_DIR, resolve
 
 random.seed(42)
 np.random.seed(42)
 
 INPUT_CSV = CSV_PATH
-OUTPUT_CSV = os.path.join(DATA_DIR, "SAML-D_large.csv")
-BACKUP_CSV = os.path.join(DATA_DIR, "SAML-D_original_backup.csv")
+OUTPUT_CSV = resolve("SAML-D_large.csv")
+BACKUP_CSV = resolve("SAML-D_original_backup.csv")
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 TARGET_TOTAL = 1_100_000  # total rows to generate (500K train + 500K test + 100K val buffer)
@@ -355,10 +355,10 @@ def main():
     df_test = df_combined.iloc[TRAIN_SPLIT + VAL_SPLIT:].copy()
 
     # Save split files
-    train_path = os.path.join(DATA_DIR, "train.csv")
-    val_path = os.path.join(DATA_DIR, "val.csv")
-    test_path = os.path.join(DATA_DIR, "test.csv")
-    full_path = os.path.join(DATA_DIR, "SAML-D_large.csv")
+    train_path = resolve("train.csv")
+    val_path = resolve("val.csv")
+    test_path = resolve("test.csv")
+    full_path = resolve("SAML-D_large.csv")
 
     df_train.to_csv(train_path, index=False)
     df_val.to_csv(val_path, index=False)
@@ -378,9 +378,9 @@ def main():
 
     print("\n" + "=" * 62)
     print("  NEXT STEPS:")
-    print("  1. python -m backend.ml.data_pipeline")
+    print("  1. python -m backend.ml.legacy.data_pipeline")
     print("     (pipeline otomatis membaca train.csv + val.csv + test.csv)")
-    print("  2. python -m backend.ml.train")
+    print("  2. python -m backend.ml.legacy.train")
     print("  3. python -m backend.main")
     print("=" * 62)
     print("\n✅ Large dataset generation complete!\n")

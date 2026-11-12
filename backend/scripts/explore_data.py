@@ -2,7 +2,7 @@
 explore_data.py — Quick verification that the pipeline output is valid.
 
 Run AFTER data_pipeline.py:
-    python -m backend.ml.data_pipeline
+    python -m backend.ml.legacy.data_pipeline
     python -m backend.scripts.explore_data
 """
 

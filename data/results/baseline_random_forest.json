@@ -1,0 +1,26 @@
+{
+  "metode": "Random Forest",
+  "threshold": 0.33706763372330634,
+  "threshold_dipilih_pada": "validation",
+  "kriteria_ambang": "minimum FP+FN",
+  "confusion_matrix": {
+    "tn": 420803,
+    "fp": 63,
+    "fn": 92,
+    "tp": 68179
+  },
+  "metrik": {
+    "precision": 0.9990768148647461,
+    "recall": 0.9986524292891564,
+    "f1": 0.9988645769999928,
+    "accuracy": 0.9996831153644071,
+    "fpr": 0.00014969135069119386,
+    "fnr": 0.00134757071084355
+  },
+  "validation": {
+    "tn": 187007,
+    "fp": 29,
+    "fn": 52,
+    "tp": 30972
+  }
+}

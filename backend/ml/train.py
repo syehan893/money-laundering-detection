@@ -1,13 +1,23 @@
 """
-train.py — Training & Evaluation Pipeline (GPU Optimized)
-==================================================================
-Optimized for RTX 3060 (6GB VRAM) + 16GB RAM:
-  - Mixed Precision (AMP) → ~40% less VRAM
-  - VRAM capped at 80% → leaves room for OS/display
-  - Edge mini-batching → controls memory per step
-  - gc + cache clearing between epochs
-  - Lower CPU thread count → system stays responsive
-  - After training: populate MongoDB with predictions & accounts
+train_v2.py — Training GAT v2 dengan type-aware sampling
+==========================================================
+Perbaikan utama terhadap `train.py` (v1):
+
+1. **Type-aware balanced sampling.** v1 memperlakukan seluruh 69.036 positif
+   secara seragam, sehingga 433 contoh laundering SAML-D asli hanya menempati
+   0,63% slot positif dan praktis tidak mempengaruhi gradien. v2 menjatah
+   `RARE_POSITIVE_BATCH_RATIO` (35%) slot positif khusus untuk tipologi langka.
+
+2. **Bobot loss per sampel.** Positif langka mendapat pengali
+   `RARE_POSITIVE_LOSS_WEIGHT` di atas cost-sensitive focal loss.
+
+3. **Seleksi model berbasis anggaran FPR.** Alih-alih skor constraint v1,
+   model dipilih berdasarkan "berapa banyak laundering yang tertangkap bila
+   kita hanya boleh salah menandai 0,1% transaksi normal" — tujuan operasional
+   yang sebenarnya. Recall tipologi langka dilaporkan terpisah tiap epoch.
+
+Catatan: `Laundering_type` dipakai SEMATA untuk bobot sampling/loss saat
+training. Ia tidak pernah masuk sebagai fitur input model.
 
 Usage:
     python -m backend.ml.train
@@ -15,579 +25,762 @@ Usage:
 
 import gc
 import json
-import math
+import logging
 import os
 import sys
 import time
-from datetime import datetime
-from typing import Dict
+from typing import Dict, List, Optional, Tuple
 
-# Reduce CUDA memory fragmentation (helpful for RTX 3060 with large graphs)
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-
-import joblib
-import pandas as pd
 
 import numpy as np
 import torch
 import torch.optim as optim
-from sklearn.metrics import (
-    classification_report,
-    confusion_matrix,
-    f1_score,
-    precision_score,
-    recall_score,
-)
+from sklearn.metrics import f1_score, precision_score, recall_score
 
-# Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from backend.ml.model import EdgeGATModel, FocalLoss, count_parameters, get_risk_category
+from backend.ml.model import EdgeGATModelV2, WeightedFocalLoss, count_parameters
+from backend.ml.utils import format_time, get_device, sanitize_for_json, set_seed
 from backend.config import (
-    DATA_PATH, MODEL_PATH, METRICS_PATH, CSV_PATH, ENCODERS_PATH,
-    TRAIN_CSV_PATH, VAL_CSV_PATH, TEST_CSV_PATH,
+    CURRENCY_EMB_DIM,
+    DATA_V2_PATH,
+    DATA_V3_PATH,
+    DATA_V4_PATH,
+    DROPOUT_V2,
+    EDGE_NUMERIC_DIM_V2,
+    ENCODERS_V2_PATH,
+    ENCODERS_V3_PATH,
+    ENCODERS_V4_PATH,
+    EPOCHS_V2,
+    FN_COST_V2,
+    FOCAL_ALPHA_V2,
+    FOCAL_GAMMA_V2,
+    FP_COST_V2,
+    HARD_MINING_RATIO_V2,
+    HARD_MINING_START_EPOCH_V2,
+    HARD_NEG_TOPK_V2,
+    HARD_POS_TOPK_V2,
+    HIDDEN_DIM_V2,
+    LABEL_SMOOTHING_V2,
+    LOCATION_EMB_DIM,
+    LR_V2,
+    MARGIN_LOSS_WEIGHT_V2,
+    MARGIN_VALUE_V2,
+    MAX_FNR,
+    MAX_FPR,
+    METRICS_V2_PATH,
+    METRICS_V3_PATH,
+    METRICS_V4_PATH,
+    MODEL_V2_PATH,
+    MODEL_V3_PATH,
+    MODEL_V4_PATH,
+    NODE_FEAT_DIM_V2,
+    NUM_HEADS_V2,
+    NUM_LAYERS_V2,
+    OVERSAMPLE_RATIO_V2,
+    PATIENCE_V2,
+    PAYMENT_TYPE_EMB_DIM,
+    POS_SLOTS_PER_STEP_V2,
+    RARE_POSITIVE_BATCH_RATIO,
+    RARE_POSITIVE_LOSS_WEIGHT,
+    SEED,
+    DATA_V5_PATH,
+    ENCODERS_V5_PATH,
+    MODEL_V5_PATH,
+    METRICS_V5_PATH,
+    EDGE_NUMERIC_DIM_V5,
+    CAT_EMBED_DROPOUT_V5,
+    STEPS_PER_EPOCH_V2,
+    MULTITASK_WEIGHT,
+    TYPE_BALANCED_SAMPLING,
+    USE_EDGE_ATTENTION,
+    USE_MOTIF_FEATURES,
+    USE_MULTITASK,
+    USE_LAYER_NORM_V2,
+    USE_RESIDUAL_V2,
+    WEIGHT_DECAY_V2,
 )
-from backend.config import EPOCHS, LR, WEIGHT_DECAY, PATIENCE, FOCAL_ALPHA, FOCAL_GAMMA
 
-# ─── Resource Limits (keep PC responsive) ────────────────────────────────────
-# Limit PyTorch CPU threads so OS stays snappy
-torch.set_num_threads(4)               # Ryzen 5 has 6C/12T → use 4 threads
-torch.set_num_interop_threads(2)
+LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-7s | %(message)s",
+    handlers=[
+        logging.FileHandler(os.path.join(LOG_DIR, "training_v2.log"), mode="a", encoding="utf-8"),
+        logging.StreamHandler(sys.stdout),
+    ],
+)
+logger = logging.getLogger(__name__)
+
+torch.set_num_threads(4)
+
+# Dataset aktif dipilih lewat --version. v3 memakai dataset yang seluruh
+# tipologinya sudah terwakili (lihat backend/scripts/generate_missing_patterns.py).
+PATHS = {
+    "v2": {"graph": DATA_V2_PATH, "artifacts": ENCODERS_V2_PATH,
+           "model": MODEL_V2_PATH, "metrics": METRICS_V2_PATH, "probs": "test_probs_v2.npy"},
+    # Graf v3 berisi 1,67 juta edge (37% lebih besar dari v2). Attention layer
+    # pertama menyimpan buffer sebesar edge x head x hidden_dim, sehingga jumlah
+    # head diturunkan menjadi 2 agar tetap muat di VRAM 8 GB.
+    "v3": {"graph": DATA_V3_PATH, "artifacts": ENCODERS_V3_PATH,
+           "model": MODEL_V3_PATH, "metrics": METRICS_V3_PATH, "probs": "test_probs_v3.npy",
+           "num_heads": 2},
+    # v4: lima pola skripsi dengan atribut realistis, ditambah tiga teknik baru
+    # (fitur motif, atensi sadar-edge, multi-task). Head tetap 2 karena atensi
+    # sadar-edge menambah buffer sebesar edge x head x hidden_dim.
+    "v4": {"graph": DATA_V4_PATH, "artifacts": ENCODERS_V4_PATH,
+           "model": MODEL_V4_PATH, "metrics": METRICS_V4_PATH, "probs": "test_probs_v4.npy",
+           "num_heads": 2, "edge_attention": True, "multitask": True},
+    # v5: data sama dengan v4, tetapi ditambah fitur ketersediaan konteks dan
+    # dropout embedding kategorikal -- keduanya menyasar kegagalan pada akun
+    # berderajat rendah. Dilatih beberapa kali dengan seed berbeda lalu
+    # probabilitasnya dirata-ratakan.
+    "v5": {"graph": DATA_V5_PATH, "artifacts": ENCODERS_V5_PATH,
+           "model": MODEL_V5_PATH, "metrics": METRICS_V5_PATH, "probs": "test_probs_v5.npy",
+           "num_heads": 2, "edge_attention": True, "multitask": True,
+           "edge_numeric_dim": EDGE_NUMERIC_DIM_V5,
+           "cat_embed_dropout": CAT_EMBED_DROPOUT_V5},
+}
 
 
-# ─── Device Setup ─────────────────────────────────────────────────────────────
-def get_device() -> torch.device:
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-        gpu_name = torch.cuda.get_device_name(0)
-        total_mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-        print(f"  GPU: {gpu_name} ({total_mem:.1f} GB VRAM)")
-
-        # Cap VRAM at 95% → leaves ~400MB for OS, most available for training
-        torch.cuda.set_per_process_memory_fraction(0.95, 0)
-        print(f"  VRAM limit: {total_mem * 0.95:.1f} GB (95%)")
-        print(f"  Mixed precision (AMP): ENABLED")
-    else:
-        device = torch.device("cpu")
-        print("  Using CPU (no CUDA available)")
-    return device
-
-
-# ─── Balanced Sampling ────────────────────────────────────────────────────────
-def get_balanced_edge_indices(
-    y: torch.Tensor, mask: torch.Tensor, oversample_ratio: float = 3.0
+# ─── Sampling ─────────────────────────────────────────────────────────────────
+def build_type_aware_batch(
+    pools: Dict[str, torch.Tensor],
+    n_pos_slots: int,
+    oversample_ratio: float = 4.0,
+    rare_ratio: float = 0.35,
+    generator: Optional[torch.Generator] = None,
 ) -> torch.Tensor:
-    """Balanced edge sampling with minority oversampling."""
-    mask_indices = mask.nonzero(as_tuple=True)[0]
-    labels = y[mask_indices]
+    """
+    Susun indeks batch dengan jatah khusus untuk positif langka.
 
-    pos_indices = mask_indices[labels == 1]
-    neg_indices = mask_indices[labels == 0]
+    Args:
+        pools: Dict berisi indeks 'rare_pos', 'common_pos', dan 'neg' hasil
+            `build_index_pools` (dihitung sekali agar tidak diulang tiap step).
+        n_pos_slots: Jumlah slot positif dalam batch.
+        oversample_ratio: Jumlah negatif per satu slot positif.
+        rare_ratio: Porsi slot positif yang dijatahkan untuk positif langka.
 
-    num_pos = len(pos_indices)
-    if num_pos == 0:
-        return neg_indices[torch.randperm(len(neg_indices))[:10000]]
+    Returns:
+        Tensor indeks edge yang sudah diacak.
+    """
+    rare_pos = pools["rare_pos"]
+    common_pos = pools["common_pos"]
+    neg_all = pools["neg"]
 
-    num_neg_sample = min(int(num_pos * oversample_ratio), len(neg_indices))
+    if len(rare_pos) == 0 and len(common_pos) == 0:
+        return neg_all[torch.randperm(len(neg_all), generator=generator)[:10_000]]
 
-    # Oversample positives
-    repeat_count = max(num_neg_sample // num_pos, 1)
-    pos_oversampled = pos_indices.repeat(repeat_count)
+    # Bila kolam per tipologi tersedia, bagi slot positif sama rata antar tipologi
+    by_type = pools.get("_by_type")
+    if by_type:
+        per_type = max(1, n_pos_slots // len(by_type))
+        parts = []
+        for members in by_type:
+            pick = torch.randint(len(members), (per_type,), generator=generator)
+            parts.append(members[pick])
+        n_neg = min(int(n_pos_slots * oversample_ratio), len(neg_all))
+        parts.append(neg_all[torch.randperm(len(neg_all), generator=generator)[:n_neg]])
+        batch = torch.cat(parts)
+        return batch[torch.randperm(len(batch), generator=generator)]
 
-    # Sample negatives
-    neg_sampled = neg_indices[torch.randperm(len(neg_indices))[:num_neg_sample]]
+    n_rare_slots = int(n_pos_slots * rare_ratio) if len(rare_pos) > 0 else 0
+    n_common_slots = n_pos_slots - n_rare_slots
 
-    balanced = torch.cat([pos_oversampled, neg_sampled])
-    return balanced[torch.randperm(len(balanced))]
+    parts = []
+    if n_rare_slots > 0:
+        # Sampling dengan pengembalian: 433 contoh mengisi ~24K slot
+        pick = torch.randint(len(rare_pos), (n_rare_slots,), generator=generator)
+        parts.append(rare_pos[pick])
+    if n_common_slots > 0 and len(common_pos) > 0:
+        pick = torch.randint(len(common_pos), (n_common_slots,), generator=generator)
+        parts.append(common_pos[pick])
+
+    n_neg = min(int(n_pos_slots * oversample_ratio), len(neg_all))
+    parts.append(neg_all[torch.randperm(len(neg_all), generator=generator)[:n_neg]])
+
+    batch = torch.cat(parts)
+    return batch[torch.randperm(len(batch), generator=generator)]
 
 
-# ─── Evaluation ───────────────────────────────────────────────────────────────
-@torch.no_grad()
-def evaluate(
-    model: EdgeGATModel,
-    data,
+def build_index_pools(
+    y: torch.Tensor, mask: torch.Tensor, is_rare: torch.Tensor,
+    laundering_type: Optional[torch.Tensor] = None,
+) -> Dict[str, torch.Tensor]:
+    """
+    Pisahkan indeks train menjadi kolam negatif dan kolam positif per tipologi.
+
+    Menyeimbangkan per tipologi, bukan sekadar langka/umum: pada dataset v3,
+    tipologi lemah seperti Cycle hanya menyumbang 4.000 dari 94.000 positif,
+    sehingga dengan sampling proporsional ia nyaris tidak pernah masuk batch.
+    Dengan porsi yang sama rata, tiap tipologi memperoleh perhatian setara.
+    """
+    idx = mask.nonzero(as_tuple=True)[0]
+    labels = y[idx]
+    rare_sel = is_rare[idx]
+    pools: Dict[str, torch.Tensor] = {
+        "rare_pos": idx[(labels == 1) & rare_sel],
+        "common_pos": idx[(labels == 1) & ~rare_sel],
+        "neg": idx[labels == 0],
+    }
+
+    if laundering_type is not None:
+        pos_idx = idx[labels == 1]
+        types = laundering_type[pos_idx]
+        by_type = []
+        for t in torch.unique(types):
+            members = pos_idx[types == t]
+            if len(members) > 0:
+                by_type.append(members)
+        pools["_by_type"] = by_type  # type: ignore[assignment]
+    return pools
+
+
+def select_hard_examples(
+    y: torch.Tensor,
     mask: torch.Tensor,
-    criterion: FocalLoss,
+    probs: torch.Tensor,
+    k_neg: int = 20_000,
+    k_pos: int = 20_000,
+) -> torch.Tensor:
+    """
+    Ambil contoh sulit sebagai **top-K**, bukan proporsi.
+
+    Versi sebelumnya mengambil 35% teratas (≈150.000 negatif), terlalu menyebar:
+    yang benar-benar menentukan letak threshold hanyalah beberapa ratus negatif
+    berskor tertinggi. Fokus top-K membuat gradien mengarah tepat ke sana.
+    """
+    idx = mask.nonzero(as_tuple=True)[0]
+    labels = y[idx].cpu().numpy()
+    p = probs[idx].cpu().numpy()
+
+    parts = []
+    for is_pos, k in [(True, k_pos), (False, k_neg)]:
+        sel = (labels == 1) if is_pos else (labels == 0)
+        cand = idx[sel]
+        scores = p[sel]
+        if len(scores) == 0:
+            continue
+        k = min(max(1, k), len(scores))
+        # positif tersulit = skor terendah; negatif tersulit = skor tertinggi
+        order = np.argpartition(scores if is_pos else -scores, k - 1)[:k]
+        parts.append(cand[torch.from_numpy(order)])
+
+    if not parts:
+        return torch.tensor([], dtype=torch.long)
+    hard = torch.cat(parts)
+    return hard[torch.randperm(len(hard))]
+
+
+def budget_margin_loss(
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+    weights: torch.Tensor,
+    max_fpr: float,
+    margin: float = 2.0,
+) -> torch.Tensor:
+    """
+    Loss yang langsung mengoptimalkan "recall pada anggaran FPR tertentu".
+
+    Focal loss menilai tiap sampel sendiri-sendiri, sehingga positif yang sudah
+    berada di p≈0,93 hampir tidak menghasilkan gradien ((1-p)^gamma ≈ 0,005) —
+    padahal justru merekalah yang tertinggal tepat di bawah threshold. Loss ini
+    bersifat *relatif*: ia mengambil skor negatif pada batas anggaran FPR sebagai
+    acuan, lalu menghukum setiap positif yang belum berada `margin` di atasnya.
+    Gradiennya mendorong positif naik sekaligus menekan negatif batas itu turun.
+    """
+    pos_mask = targets > 0.5
+    neg_mask = ~pos_mask
+    if pos_mask.sum() == 0 or neg_mask.sum() == 0:
+        return logits.sum() * 0.0
+
+    neg_logits = logits[neg_mask]
+    k = max(1, int(neg_logits.numel() * max_fpr))
+    reference = torch.topk(neg_logits, k).values.mean()
+
+    pos_logits = logits[pos_mask]
+    pos_weights = weights[pos_mask]
+    violation = torch.relu(margin - (pos_logits - reference))
+    return (violation * pos_weights).sum() / pos_weights.sum().clamp(min=1.0)
+
+
+def mix_hard(base: torch.Tensor, hard: torch.Tensor, ratio: float) -> torch.Tensor:
+    """Ganti sebagian indeks batch dengan contoh sulit."""
+    if len(hard) == 0 or ratio <= 0:
+        return base
+    n_hard = min(int(len(base) * ratio), len(hard))
+    keep = base[torch.randperm(len(base))[: len(base) - n_hard]]
+    chosen = hard[torch.randperm(len(hard))[:n_hard]]
+    mixed = torch.cat([keep, chosen])
+    return mixed[torch.randperm(len(mixed))]
+
+
+# ─── Evaluasi ─────────────────────────────────────────────────────────────────
+@torch.no_grad()
+def infer_all_edges(
+    model: EdgeGATModelV2,
+    tensors: Dict[str, torch.Tensor],
     device: torch.device,
-    threshold: float = 0.5,
     use_amp: bool = True,
-) -> Dict:
-    """Memory-efficient evaluation."""
+) -> torch.Tensor:
+    """Inferensi seluruh edge (chunked, tanpa gradien). Dipakai validasi + hard mining."""
     model.eval()
-
     with torch.amp.autocast("cuda", enabled=(use_amp and device.type == "cuda")):
-        logits = model(
-            data.x.to(device),
-            data.edge_index.to(device),
-            data.edge_attr.to(device),
+        h = model.encode_nodes(
+            tensors["x"], tensors["edge_index"], tensors["edge_attr"], tensors["edge_cat"]
         )
+        logits = model.score_edges(
+            h, tensors["edge_index"], tensors["edge_attr"], tensors["edge_cat"], chunked=True
+        )
+    return torch.sigmoid(logits.float()).cpu()
 
-    # Apply sigmoid to get probabilities (model returns raw logits)
-    probs_masked = torch.sigmoid(logits[mask]).cpu().numpy()
-    labels_masked = data.y[mask].cpu().numpy()
-    loss = criterion(logits[mask], data.y[mask].to(device)).item()
 
-    binary_preds = (probs_masked >= threshold).astype(int)
-    precision = precision_score(labels_masked, binary_preds, zero_division=0)
-    recall = recall_score(labels_masked, binary_preds, zero_division=0)
-    f1 = f1_score(labels_masked, binary_preds, zero_division=0)
+def slice_by_mask(
+    probs: torch.Tensor, data, mask: torch.Tensor
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Ambil (probs, labels, is_rare) untuk satu split."""
+    m = mask.cpu().numpy()
+    return probs.numpy()[m], data.y.numpy()[m], data.is_rare_positive.numpy()[m]
 
-    return {
-        "loss": loss,
-        "precision": precision,
-        "recall": recall,
-        "f1": f1,
-        "preds": probs_masked,
-        "labels": labels_masked,
-        "binary_preds": binary_preds,
+
+def threshold_at_fpr_budget(
+    probs: np.ndarray, labels: np.ndarray, max_fpr: float = 0.001
+) -> Tuple[float, Dict]:
+    """
+    Cari threshold tertinggi yang masih memenuhi FPR <= max_fpr, lalu laporkan FNR di titik itu.
+
+    Ini menjawab pertanyaan operasional yang sebenarnya: "bila kita hanya boleh
+    salah menandai 0,1% transaksi normal, berapa banyak laundering yang lolos?"
+    """
+    neg = np.sort(probs[labels == 0])[::-1]
+    n_neg = len(neg)
+    budget = int(n_neg * max_fpr)
+
+    if n_neg == 0:
+        thr = 0.5
+    elif budget <= 0:
+        thr = float(neg[0]) + 1e-6
+    else:
+        thr = float(neg[min(budget, n_neg - 1)])
+
+    thr = min(max(thr, 1e-6), 1.0 - 1e-6)
+    pred = (probs >= thr).astype(int)
+    tp = int(((pred == 1) & (labels == 1)).sum())
+    tn = int(((pred == 0) & (labels == 0)).sum())
+    fp = int(((pred == 1) & (labels == 0)).sum())
+    fn = int(((pred == 0) & (labels == 1)).sum())
+
+    return thr, {
+        "threshold": thr,
+        "tn": tn, "fp": fp, "fn": fn, "tp": tp,
+        "fpr": fp / max(tn + fp, 1),
+        "fnr": fn / max(tp + fn, 1),
     }
 
 
-def find_best_threshold(preds: np.ndarray, labels: np.ndarray) -> tuple:
-    """Find threshold maximizing F1."""
-    best_f1, best_t = 0, 0.5
-    for t in np.arange(0.05, 0.95, 0.05):
-        f1 = f1_score(labels, (preds >= t).astype(int), zero_division=0)
-        if f1 > best_f1:
-            best_f1 = f1
-            best_t = t
-    return best_t, best_f1
+def metrics_at(probs: np.ndarray, labels: np.ndarray, is_rare: np.ndarray, thr: float) -> Dict:
+    """Confusion matrix + rincian recall untuk kelompok sintetis vs langka."""
+    pred = (probs >= thr).astype(int)
+    tp = int(((pred == 1) & (labels == 1)).sum())
+    tn = int(((pred == 0) & (labels == 0)).sum())
+    fp = int(((pred == 1) & (labels == 0)).sum())
+    fn = int(((pred == 0) & (labels == 1)).sum())
 
+    rare_pos = (labels == 1) & is_rare
+    synth_pos = (labels == 1) & ~is_rare
+    rare_hit = int((pred[rare_pos] == 1).sum())
+    synth_hit = int((pred[synth_pos] == 1).sum())
 
-# ─── Training (AMP + balanced sampling) ──────────────────────────────────────
-def train_one_epoch(
-    model: EdgeGATModel,
-    data,
-    optimizer: optim.Optimizer,
-    criterion: FocalLoss,
-    scaler: torch.amp.GradScaler,
-    device: torch.device,
-    use_amp: bool = True,
-    oversample_ratio: float = 3.0,
-) -> float:
-    """Train one epoch with AMP mixed precision + balanced sampling."""
-    model.train()
-    optimizer.zero_grad(set_to_none=True)  # More memory efficient
-
-    # Forward with mixed precision
-    with torch.amp.autocast("cuda", enabled=(use_amp and device.type == "cuda")):
-        preds = model(
-            data.x.to(device),
-            data.edge_index.to(device),
-            data.edge_attr.to(device),
-        )
-
-        balanced_idx = get_balanced_edge_indices(
-            data.y, data.train_mask, oversample_ratio=oversample_ratio
-        )
-        loss = criterion(preds[balanced_idx], data.y[balanced_idx].to(device))
-
-    # Backward with gradient scaling (AMP)
-    if use_amp and device.type == "cuda":
-        scaler.scale(loss).backward()
-        scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        scaler.step(optimizer)
-        scaler.update()
-    else:
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        optimizer.step()
-
-    return loss.item()
-
-
-# ─── Risk Distribution ────────────────────────────────────────────────────────
-def compute_risk_distribution(preds: np.ndarray) -> Dict[str, int]:
-    risk_counts = {"Low": 0, "Moderate": 0, "High": 0, "Critical": 0}
-    for p in preds:
-        risk_counts[get_risk_category(float(p))] += 1
-    return risk_counts
+    return {
+        "threshold": float(thr),
+        "confusion_matrix": {"tn": tn, "fp": fp, "fn": fn, "tp": tp},
+        "fpr": fp / max(tn + fp, 1),
+        "fnr": fn / max(tp + fn, 1),
+        "precision": tp / max(tp + fp, 1),
+        "recall": tp / max(tp + fn, 1),
+        "accuracy": (tp + tn) / max(tp + tn + fp + fn, 1),
+        "rare_total": int(rare_pos.sum()),
+        "rare_caught": rare_hit,
+        "rare_recall": rare_hit / max(int(rare_pos.sum()), 1),
+        "synthetic_total": int(synth_pos.sum()),
+        "synthetic_caught": synth_hit,
+        "synthetic_recall": synth_hit / max(int(synth_pos.sum()), 1),
+    }
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
-def main():
-    print("╔══════════════════════════════════════════════════════════╗")
-    print("║  AML Detection — GAT Training (GPU Optimized)            ║")
-    print("╚══════════════════════════════════════════════════════════╝\n")
+def main(version: str = "v2", seed: int = None, override: Dict = None) -> Dict:
+    """
+    `override` menimpa hyperparameter untuk satu kali jalan.
 
-    # ── Load Data ──
-    print("[1/5] Loading processed data ...")
-    if not os.path.exists(DATA_PATH):
-        print(f"  ❌ {DATA_PATH} not found! Run data_pipeline.py first.")
-        return
-    data = torch.load(DATA_PATH, weights_only=False)
-    print(f"  Nodes: {data.num_nodes:,} | Edges: {data.edge_index.shape[1]:,}")
+    Dipakai membangun ensemble beragam: anggota dengan konfigurasi berbeda
+    membuat kesalahan yang berbeda pula, sehingga rata-ratanya lebih kuat
+    daripada beberapa seed dengan konfigurasi identik. Kunci yang dikenali:
+    fn_cost, dropout, hidden_dim, label_smoothing, focal_alpha.
+    """
+    paths = PATHS[version]
+    seed = SEED if seed is None else seed
+    ov = override or {}
+    hp_fn_cost = ov.get("fn_cost", FN_COST_V2)
+    hp_dropout = ov.get("dropout", DROPOUT_V2)
+    hp_hidden = ov.get("hidden_dim", HIDDEN_DIM_V2)
+    hp_smooth = ov.get("label_smoothing", LABEL_SMOOTHING_V2)
+    hp_alpha = ov.get("focal_alpha", FOCAL_ALPHA_V2)
+    hp_tag = ov.get("tag", "")
+    logger.info("=" * 70)
+    logger.info(f"AML Detection — GAT v2 (type-aware sampling, dataset {version})")
+    logger.info("=" * 70)
 
-    num_pos = int(data.y.sum().item())
-    num_neg = int(data.y.shape[0]) - num_pos
-    print(f"  Class 0: {num_neg:,} | Class 1: {num_pos:,} | Ratio: {num_neg/max(num_pos,1):.1f}:1")
+    set_seed(seed)
+    gen = torch.Generator().manual_seed(seed)
 
-    # Print split sizes
-    train_sz = int(data.train_mask.sum().item())
-    val_sz = int(data.val_mask.sum().item())
-    test_sz = int(data.test_mask.sum().item())
-    print(f"  Split sizes: train={train_sz:,} | val={val_sz:,} | test={test_sz:,}")
+    if not os.path.exists(paths["graph"]):
+        logger.error(f"  {paths['graph']} tidak ditemukan. Jalankan data_pipeline_v2 lebih dulu.")
+        return {}
 
-    # ── Device ──
+    # Tiap seed menulis ke berkasnya sendiri agar bisa dirata-ratakan nanti
+    sufiks = hp_tag or (f"seed{seed}" if seed != SEED else "")
+    if sufiks:
+        paths = dict(paths)
+        for k, ext in (("model", ".pt"), ("metrics", ".json")):
+            paths[k] = paths[k].replace(ext, f"_{sufiks}{ext}")
+        paths["probs"] = paths["probs"].replace(".npy", f"_{sufiks}.npy")
+
+    data = torch.load(paths["graph"], weights_only=False)
+    logger.info(f"  Node: {data.num_nodes:,} | Edge: {data.edge_index.shape[1]:,}")
+    n_rare_train = int((data.is_rare_positive & data.train_mask).sum())
+    n_pos_train = int(data.y[data.train_mask].sum())
+    logger.info(f"  Positif train: {n_pos_train:,} ({n_rare_train} di antaranya tipologi langka)")
+
     device = get_device()
     use_amp = device.type == "cuda"
 
-    # ── Model ──
-    print(f"\n[2/5] Initializing EdgeGATModel ...")
-    model = EdgeGATModel(
-        node_feat_dim=data.x.shape[1],
-        edge_feat_dim=data.edge_attr.shape[1],
-        hidden_dim=64,
-        num_heads=4,
-        dropout=0.3,
+    import joblib
+    artifacts = joblib.load(paths["artifacts"])
+    cards = artifacts["cat_cardinalities"]
+
+    # Multi-task: jumlah kelas jenis pola (termasuk kelas Normal)
+    use_edge_attn = paths.get("edge_attention", False) and USE_EDGE_ATTENTION
+    use_mt = paths.get("multitask", False) and USE_MULTITASK and hasattr(data, "laundering_type")
+    n_typologies = int(data.laundering_type.max()) + 1 if use_mt else 0
+    emb_dims = (CURRENCY_EMB_DIM, CURRENCY_EMB_DIM, LOCATION_EMB_DIM, LOCATION_EMB_DIM, PAYMENT_TYPE_EMB_DIM)
+
+    model = EdgeGATModelV2(
+        node_feat_dim=NODE_FEAT_DIM_V2,
+        edge_numeric_dim=paths.get("edge_numeric_dim", EDGE_NUMERIC_DIM_V2),
+        cat_cardinalities=cards,
+        cat_emb_dims=emb_dims,
+        hidden_dim=hp_hidden,
+        num_heads=paths.get("num_heads", NUM_HEADS_V2),
+        num_layers=NUM_LAYERS_V2,
+        dropout=hp_dropout,
+        use_layer_norm=USE_LAYER_NORM_V2,
+        use_residual=USE_RESIDUAL_V2,
+        use_edge_attention=paths.get("edge_attention", False) and USE_EDGE_ATTENTION,
+        num_typologies=n_typologies,
+        cat_embed_dropout=paths.get("cat_embed_dropout", 0.0),
     ).to(device)
-    print(f"  Parameters: {count_parameters(model):,}")
-
-    if device.type == "cuda":
-        mem_alloc = torch.cuda.memory_allocated() / (1024**2)
-        print(f"  VRAM after model load: {mem_alloc:.0f} MB")
-        torch.cuda.empty_cache()
-        print("  ✓ CUDA cache cleared before training")
-
-    # ── Loss, Optimizer, AMP Scaler ──
-    criterion = FocalLoss(alpha=FOCAL_ALPHA, gamma=FOCAL_GAMMA).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
-    scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer, T_0=20, T_mult=2, eta_min=1e-6
+    logger.info(f"  Parameter: {count_parameters(model):,}")
+    logger.info(
+        f"  Teknik aktif: motif={'ya' if USE_MOTIF_FEATURES else 'tidak'} | "
+        f"atensi sadar-edge={'ya' if use_edge_attn else 'tidak'} | "
+        f"multi-task={'ya (' + str(n_typologies) + ' kelas)' if n_typologies else 'tidak'}"
     )
+    logger.info(f"  Kardinalitas kategorikal: {cards}")
+
+    criterion = WeightedFocalLoss(
+        alpha=hp_alpha,
+        gamma=FOCAL_GAMMA_V2,
+        fn_cost=hp_fn_cost,
+        fp_cost=FP_COST_V2,
+        label_smoothing=hp_smooth,
+    ).to(device)
+
+    optimizer = optim.AdamW(model.parameters(), lr=LR_V2, weight_decay=WEIGHT_DECAY_V2)
+    scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=25, T_mult=2, eta_min=1e-6)
     grad_scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
-    # ── Training Loop ──
-    oversample_ratio = 5.0
-    print(f"\n[3/5] Training (epochs={EPOCHS}, patience={PATIENCE}, AMP={'ON' if use_amp else 'OFF'}) ...\n")
-    print(f"  {'Ep':>4} | {'T.Loss':>8} | {'V.Loss':>8} | {'V.P':>6} | {'V.R':>6} | {'V.F1':>6} | {'VRAM':>6} | {'Time':>5}")
-    print("  " + "-" * 64)
+    # Bobot loss per edge: positif langka diberi pengali tambahan
+    weights_all = torch.ones(data.y.shape[0], dtype=torch.float32)
+    weights_all[data.is_rare_positive] = RARE_POSITIVE_LOSS_WEIGHT
+    weights_all = weights_all.to(device)
 
-    best_val_f1 = 0.0
+    logger.info(
+        f"\n[Training] epochs={EPOCHS_V2} patience={PATIENCE_V2} "
+        f"rare_slot={RARE_POSITIVE_BATCH_RATIO:.0%} rare_w={RARE_POSITIVE_LOSS_WEIGHT} "
+        f"FN_cost={hp_fn_cost} AMP={'ON' if use_amp else 'OFF'}"
+    )
+    logger.info(
+        f"  {'Ep':>4} | {'Loss':>8} | {'thr':>6} | {'FP':>5} | {'FN':>5} | "
+        f"{'FPR%':>7} | {'FNR%':>7} | {'Langka':>12} | {'Waktu':>6}"
+    )
+    logger.info("  " + "-" * 92)
+
+    best_score = -1.0
     best_epoch = 0
-    patience_counter = 0
-    history = []
+    patience = 0
+    history: List[Dict] = []
+    hard_idx: Optional[torch.Tensor] = None
 
-    for epoch in range(1, EPOCHS + 1):
+    ckpt_dir = os.path.join(os.path.dirname(paths["model"]), "checkpoints")
+    os.makedirs(ckpt_dir, exist_ok=True)
+
+    x_dev = data.x.to(device)
+    ei_dev = data.edge_index.to(device)
+    ea_dev = data.edge_attr.to(device)
+    ec_dev = data.edge_cat.to(device)
+    y_dev = data.y.to(device)
+    tensors = {"x": x_dev, "edge_index": ei_dev, "edge_attr": ea_dev, "edge_cat": ec_dev}
+    type_dev = data.laundering_type.to(device) if use_mt else None
+
+    pools = build_index_pools(
+        data.y, data.train_mask, data.is_rare_positive,
+        laundering_type=getattr(data, "laundering_type", None) if TYPE_BALANCED_SAMPLING else None,
+    )
+    n_types = len(pools.get("_by_type") or [])
+    logger.info(
+        f"  Kolam sampling: langka={len(pools['rare_pos']):,} "
+        f"umum={len(pools['common_pos']):,} negatif={len(pools['neg']):,}"
+        + (f" | seimbang per tipologi ({n_types} tipologi)" if n_types else "")
+    )
+    logger.info(
+        f"  Batch per step: {POS_SLOTS_PER_STEP_V2:,} positif "
+        f"({int(POS_SLOTS_PER_STEP_V2 * RARE_POSITIVE_BATCH_RATIO):,} slot langka) "
+        f"+ {int(POS_SLOTS_PER_STEP_V2 * OVERSAMPLE_RATIO_V2):,} negatif "
+        f"x {STEPS_PER_EPOCH_V2} step/epoch"
+    )
+
+    for epoch in range(1, EPOCHS_V2 + 1):
         t0 = time.time()
+        model.train()
+        step_losses = []
 
-        train_loss = train_one_epoch(
-            model, data, optimizer, criterion, grad_scaler,
-            device, use_amp=use_amp, oversample_ratio=oversample_ratio,
-        )
+        for _ in range(STEPS_PER_EPOCH_V2):
+            optimizer.zero_grad(set_to_none=True)
 
-        val_metrics = evaluate(model, data, data.val_mask, criterion, device, use_amp=use_amp)
+            batch_idx = build_type_aware_batch(
+                pools,
+                n_pos_slots=POS_SLOTS_PER_STEP_V2,
+                oversample_ratio=OVERSAMPLE_RATIO_V2,
+                rare_ratio=RARE_POSITIVE_BATCH_RATIO,
+                generator=gen,
+            )
+            if hard_idx is not None and epoch >= HARD_MINING_START_EPOCH_V2:
+                batch_idx = mix_hard(batch_idx, hard_idx, HARD_MINING_RATIO_V2)
+            bi = batch_idx.to(device)
+
+            with torch.amp.autocast("cuda", enabled=use_amp):
+                # Encoding node atas graf penuh, tetapi gradien edge hanya
+                # untuk batch -- kunci agar model v2 muat di VRAM 8 GB.
+                h = model.encode_nodes(x_dev, ei_dev, ea_dev, ec_dev)
+                scored = model.score_edges(h, ei_dev, ea_dev, ec_dev, subset=bi,
+                                           chunked=False, return_typology=use_mt)
+                if use_mt:
+                    logits, type_logits = scored
+                else:
+                    logits, type_logits = scored, None
+
+                focal = criterion(logits, y_dev[bi], sample_weights=weights_all[bi])
+                margin = budget_margin_loss(
+                    logits.float(), y_dev[bi], weights_all[bi],
+                    max_fpr=MAX_FPR, margin=MARGIN_VALUE_V2,
+                )
+                loss = focal + MARGIN_LOSS_WEIGHT_V2 * margin
+
+                # Tugas tambahan: mengenali JENIS pola, bukan sekadar
+                # laundering/bukan. Memaksa representasi khas tiap pola.
+                if type_logits is not None:
+                    mt = torch.nn.functional.cross_entropy(
+                        type_logits.float(), type_dev[bi]
+                    )
+                    loss = loss + MULTITASK_WEIGHT * mt
+
+            if use_amp:
+                grad_scaler.scale(loss).backward()
+                grad_scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                grad_scaler.step(optimizer)
+                grad_scaler.update()
+            else:
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+
+            step_losses.append(float(loss.item()))
+            del h, logits, loss, focal, margin, scored
+
         scheduler.step()
-        elapsed = time.time() - t0
+        loss_value = float(np.mean(step_losses))
 
-        # VRAM usage
-        vram_mb = torch.cuda.memory_allocated() / (1024**2) if device.type == "cuda" else 0
-
-        if epoch <= 3 or epoch % 5 == 0 or epoch == EPOCHS:
-            print(
-                f"  {epoch:4d} | {train_loss:8.5f} | {val_metrics['loss']:8.5f} | "
-                f"{val_metrics['precision']:6.4f} | {val_metrics['recall']:6.4f} | "
-                f"{val_metrics['f1']:6.4f} | {vram_mb:5.0f}M | {elapsed:5.1f}s"
+        # Satu inferensi penuh melayani validasi sekaligus hard mining
+        all_probs = infer_all_edges(model, tensors, device, use_amp)
+        if epoch >= HARD_MINING_START_EPOCH_V2 - 1:
+            hard_idx = select_hard_examples(
+                data.y, data.train_mask, all_probs,
+                k_neg=HARD_NEG_TOPK_V2, k_pos=HARD_POS_TOPK_V2,
             )
 
+        # ── Validasi ──
+        vp, vy, vr = slice_by_mask(all_probs, data, data.val_mask)
+        thr, budget_metrics = threshold_at_fpr_budget(vp, vy, max_fpr=MAX_FPR)
+        vm = metrics_at(vp, vy, vr, thr)
+        score = 1.0 - vm["fnr"]
+
+        elapsed = time.time() - t0
         history.append({
             "epoch": epoch,
-            "train_loss": train_loss,
-            "val_loss": val_metrics["loss"],
-            "val_precision": val_metrics["precision"],
-            "val_recall": val_metrics["recall"],
-            "val_f1": val_metrics["f1"],
+            "train_loss": loss_value,
+            "val_threshold": thr,
+            "val_fp": vm["confusion_matrix"]["fp"],
+            "val_fn": vm["confusion_matrix"]["fn"],
+            "val_fpr": vm["fpr"],
+            "val_fnr": vm["fnr"],
+            "val_rare_recall": vm["rare_recall"],
+            "val_synthetic_recall": vm["synthetic_recall"],
+            "val_precision": vm["precision"],
+            "val_recall": vm["recall"],
             "lr": optimizer.param_groups[0]["lr"],
             "time": elapsed,
-            "vram_mb": vram_mb,
         })
 
-        if val_metrics["f1"] > best_val_f1:
-            best_val_f1 = val_metrics["f1"]
-            best_epoch = epoch
-            patience_counter = 0
-            torch.save(model.state_dict(), MODEL_PATH)
-        else:
-            patience_counter += 1
-            if patience_counter >= PATIENCE:
-                print(f"\n  ⏹ Early stopping at epoch {epoch} (best: {best_epoch})")
-                break
+        if epoch <= 5 or epoch % 5 == 0 or score > best_score:
+            logger.info(
+                f"  {epoch:4d} | {loss_value:8.5f} | {thr:6.3f} | "
+                f"{vm['confusion_matrix']['fp']:5d} | {vm['confusion_matrix']['fn']:5d} | "
+                f"{vm['fpr']*100:7.4f} | {vm['fnr']*100:7.4f} | "
+                f"{vm['rare_caught']:4d}/{vm['rare_total']:<4d} ({vm['rare_recall']*100:3.0f}%) | "
+                f"{format_time(elapsed)}"
+            )
 
-        # Memory cleanup every epoch (critical for large graphs on 8GB VRAM)
+        if score > best_score:
+            best_score = score
+            best_epoch = epoch
+            patience = 0
+            torch.save(model.state_dict(), paths["model"])
+            torch.save(
+                {"epoch": epoch, "model_state_dict": model.state_dict(), "score": score},
+                os.path.join(ckpt_dir, f"best_checkpoint_{version}.pt"),
+            )
+        else:
+            patience += 1
+
+        if patience >= PATIENCE_V2:
+            logger.info(f"\n  Early stopping di epoch {epoch} (terbaik: {best_epoch})")
+            break
+
         gc.collect()
         if device.type == "cuda":
             torch.cuda.empty_cache()
 
-    print(f"\n  ✓ Best Val F1: {best_val_f1:.4f} at epoch {best_epoch}")
+    logger.info(f"\n  Skor validasi terbaik: {best_score:.6f} (epoch {best_epoch})")
 
-    # ── Test Evaluation ──
-    print(f"\n[4/5] Test evaluation ...")
-    model.load_state_dict(torch.load(MODEL_PATH, weights_only=True))
+    # ── Evaluasi test ──
+    logger.info("\n[Evaluasi test] ...")
+    model.load_state_dict(torch.load(paths["model"], map_location=device, weights_only=True))
 
-    val_eval = evaluate(model, data, data.val_mask, criterion, device, use_amp=use_amp)
-    optimal_thresh, optimal_f1 = find_best_threshold(val_eval["preds"], val_eval["labels"])
-    print(f"  Optimal threshold: {optimal_thresh:.2f} (val F1={optimal_f1:.4f})")
+    final_probs = infer_all_edges(model, tensors, device, use_amp)
+    vp, vy, vr = slice_by_mask(final_probs, data, data.val_mask)
+    thr, _ = threshold_at_fpr_budget(vp, vy, max_fpr=MAX_FPR)
+    val_metrics = metrics_at(vp, vy, vr, thr)
+    logger.info(f"  Threshold dari validasi: {thr:.4f}")
 
-    test_metrics = evaluate(
-        model, data, data.test_mask, criterion, device,
-        threshold=optimal_thresh, use_amp=use_amp,
-    )
+    tp_, ty, tr_ = slice_by_mask(final_probs, data, data.test_mask)
+    test_metrics = metrics_at(tp_, ty, tr_, thr)
+    cm = test_metrics["confusion_matrix"]
 
-    print("\n  ── Classification Report ──")
-    report = classification_report(
-        test_metrics["labels"],
-        test_metrics["binary_preds"],
-        target_names=["Normal (0)", "Laundering (1)"],
-        digits=4,
-    )
-    print(report)
+    logger.info("\n  == Confusion Matrix (test) ==")
+    logger.info(f"    TN {cm['tn']:>8,}  |  FP {cm['fp']:>6,}")
+    logger.info(f"    FN {cm['fn']:>8,}  |  TP {cm['tp']:>6,}")
+    logger.info(f"  FPR {test_metrics['fpr']*100:.4f}%  FNR {test_metrics['fnr']*100:.4f}%  "
+                f"Akurasi {test_metrics['accuracy']*100:.4f}%")
+    logger.info(f"  Precision {test_metrics['precision']:.4f}  Recall {test_metrics['recall']:.4f}")
+    logger.info(f"  Recall tipologi langka : {test_metrics['rare_caught']}/{test_metrics['rare_total']} "
+                f"({test_metrics['rare_recall']*100:.1f}%)")
+    logger.info(f"  Recall pola sintetis   : {test_metrics['synthetic_caught']:,}/{test_metrics['synthetic_total']:,} "
+                f"({test_metrics['synthetic_recall']*100:.2f}%)")
 
-    cm = confusion_matrix(test_metrics["labels"], test_metrics["binary_preds"])
-    print("  ── Confusion Matrix ──")
-    print(f"                    Predicted 0    Predicted 1")
-    print(f"  Actual 0 (Normal)     {cm[0][0]:>8,}       {cm[0][1]:>8,}")
-    print(f"  Actual 1 (Launder)    {cm[1][0]:>8,}       {cm[1][1]:>8,}")
+    target_ok = test_metrics["fpr"] < MAX_FPR and test_metrics["fnr"] < MAX_FNR
+    logger.info(f"\n  Target FPR<{MAX_FPR:.1%} & FNR<{MAX_FNR:.1%}: "
+                f"{'TERCAPAI' if target_ok else 'BELUM tercapai'}")
 
-    risk_dist = compute_risk_distribution(test_metrics["preds"])
-    print("\n  ── Risk Distribution (Test Set) ──")
-    total_test = len(test_metrics["preds"])
-    for cat in ["Low", "Moderate", "High", "Critical"]:
-        count = risk_dist[cat]
-        pct = count / total_test * 100
-        bar = "█" * int(pct / 2)
-        print(f"  {cat:>10}: {count:>8,}  ({pct:5.2f}%) {bar}")
-
-    # ── Save ──
-    print(f"\n[5/5] Saving outputs ...")
-    metrics_output = {
+    pred_bin = (tp_ >= thr).astype(int)
+    output = {
+        "version": version,
         "best_epoch": best_epoch,
-        "best_val_f1": best_val_f1,
-        "optimal_threshold": optimal_thresh,
+        "best_val_score": best_score,
+        "optimal_threshold": float(thr),
+        "threshold_selection": "fpr_budget",
         "test_metrics": {
-            "precision": test_metrics["precision"],
-            "recall": test_metrics["recall"],
-            "f1": test_metrics["f1"],
-            "loss": test_metrics["loss"],
+            "precision": float(precision_score(ty, pred_bin, zero_division=0)),
+            "recall": float(recall_score(ty, pred_bin, zero_division=0)),
+            "f1": float(f1_score(ty, pred_bin, zero_division=0)),
         },
-        "confusion_matrix": {
-            "tn": int(cm[0][0]),
-            "fp": int(cm[0][1]),
-            "fn": int(cm[1][0]),
-            "tp": int(cm[1][1]),
+        "confusion_matrix": cm,
+        "error_rates": {
+            "fpr": test_metrics["fpr"],
+            "fnr": test_metrics["fnr"],
+            "tpr": test_metrics["recall"],
+            "tnr": 1.0 - test_metrics["fpr"],
+            "accuracy": test_metrics["accuracy"],
         },
-        "risk_distribution": risk_dist,
+        "breakdown": {
+            "rare_total": test_metrics["rare_total"],
+            "rare_caught": test_metrics["rare_caught"],
+            "rare_recall": test_metrics["rare_recall"],
+            "synthetic_total": test_metrics["synthetic_total"],
+            "synthetic_caught": test_metrics["synthetic_caught"],
+            "synthetic_recall": test_metrics["synthetic_recall"],
+        },
+        "val_metrics": val_metrics,
+        "target_achieved": bool(target_ok),
         "hyperparameters": {
             "epochs_trained": len(history),
-            "lr": LR,
-            "weight_decay": WEIGHT_DECAY,
-            "focal_alpha": FOCAL_ALPHA,
-            "focal_gamma": FOCAL_GAMMA,
-            "hidden_dim": 64,
-            "num_heads": 4,
-            "dropout": 0.3,
-            "threshold": optimal_thresh,
-            "oversample_ratio": oversample_ratio,
+            "lr": LR_V2,
+            "weight_decay": WEIGHT_DECAY_V2,
+            "focal_alpha": hp_alpha,
+            "focal_gamma": FOCAL_GAMMA_V2,
+            "fn_cost": hp_fn_cost,
+            "fp_cost": FP_COST_V2,
+            "hidden_dim": hp_hidden,
+            "num_heads": paths.get("num_heads", NUM_HEADS_V2),
+            "num_layers": NUM_LAYERS_V2,
+            "dropout": hp_dropout,
+            "oversample_ratio": OVERSAMPLE_RATIO_V2,
+            "rare_positive_batch_ratio": RARE_POSITIVE_BATCH_RATIO,
+            "rare_positive_loss_weight": RARE_POSITIVE_LOSS_WEIGHT,
+            "hard_neg_topk": HARD_NEG_TOPK_V2,
+            "hard_pos_topk": HARD_POS_TOPK_V2,
+            "margin_loss_weight": MARGIN_LOSS_WEIGHT_V2,
+            "margin_value": MARGIN_VALUE_V2,
+            "seed": seed,
+            "use_motif_features": USE_MOTIF_FEATURES,
+            "use_edge_attention": use_edge_attn,
+            "use_multitask": bool(n_typologies),
+            "multitask_weight": MULTITASK_WEIGHT if n_typologies else 0.0,
         },
-        "training_history": history,
+        "training_history": sanitize_for_json(history),
     }
 
-    with open(METRICS_PATH, "w") as f:
-        json.dump(metrics_output, f, indent=2)
-    print(f"  ✓ Model: {MODEL_PATH}")
-    print(f"  ✓ Metrics: {METRICS_PATH}")
-
-    # Final cleanup
-    gc.collect()
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
-
-    # ── Populate MongoDB ──
-    print(f"\n[6/6] Populating MongoDB ...")
-    populate_mongodb(model, data, metrics_output, device)
-
-    print("\n✅ Training complete! MongoDB populated. Ready for FastAPI Backend.\n")
-
-
-# ─── MongoDB Population ──────────────────────────────────────────────────────
-def populate_mongodb(model, data, metrics_output, device):
-    """Run inference on all transactions and populate MongoDB collections."""
-    from backend.database import get_sync_db, setup_sync_indexes, close_sync_db
-
-    db = get_sync_db()
-    setup_sync_indexes(db)
-
-    # ── 1) Load CSV + run inference ──
-    print("  🔄 Loading CSV and running inference ...")
-    # Prefer full dataset; fallback to split files merged together
-    if os.path.exists(CSV_PATH):
-        df = pd.read_csv(CSV_PATH)
-    else:
-        # Merge split files if full dataset not available
-        dfs = []
-        for split_path in [TRAIN_CSV_PATH, VAL_CSV_PATH, TEST_CSV_PATH]:
-            if os.path.exists(split_path):
-                dfs.append(pd.read_csv(split_path))
-        df = pd.concat(dfs, ignore_index=True)
-    df["datetime"] = pd.to_datetime(
-        df["Date"].astype(str) + " " + df["Time"].astype(str),
-        format="%Y-%m-%d %H:%M:%S", errors="coerce",
-    )
-    df = df.sort_values("datetime").reset_index(drop=True)
-
-    model.eval()
-    with torch.no_grad():
-        preds = model.predict(
-            data.x.to(device), data.edge_index.to(device), data.edge_attr.to(device)
-        )
-    preds_np = preds.cpu().numpy()
-
-    num_preds = len(preds_np)
-    df = df.iloc[:num_preds].copy()
-    df["prediction_probability"] = preds_np
-    df["prediction_risk_category"] = df["prediction_probability"].apply(
-        lambda p: get_risk_category(float(p))
-    )
-
-    # Normalize column names
-    df["sender_account"] = df["Sender_account"].astype(str)
-    df["receiver_account"] = df["Receiver_account"].astype(str)
-    df["amount"] = df["Amount"]
-    df["payment_currency"] = df["Payment_currency"]
-    df["received_currency"] = df["Received_currency"]
-    df["sender_bank_location"] = df["Sender_bank_location"]
-    df["receiver_bank_location"] = df["Receiver_bank_location"]
-    df["payment_type"] = df["Payment_type"]
-    df["is_laundering"] = df["Is_laundering"].astype(int)
-
-    # ── 2) Build account profiles ──
-    print("  🔄 Building account profiles ...")
-    accounts = {}
-
-    def _new_account(acc_id):
-        return {
-            "account_id": acc_id,
-            "risk_score": 0.0,
-            "risk_category": "Low",
-            "avg_risk_score": 0.0,
-            "total_sent": 0.0,
-            "total_received": 0.0,
-            "tx_count_sent": 0,
-            "tx_count_received": 0,
-            "unique_partners": set(),
-            "foreign_tx": 0,
-            "cross_border_tx": 0,
-            "total_tx": 0,
-            "risk_probs": [],
-        }
-
-    for acc, grp in df.groupby("sender_account"):
-        if acc not in accounts:
-            accounts[acc] = _new_account(acc)
-        a = accounts[acc]
-        a["total_sent"] += float(grp["amount"].sum())
-        a["tx_count_sent"] += len(grp)
-        a["unique_partners"].update(grp["receiver_account"].unique())
-        a["foreign_tx"] += int((grp["payment_currency"] != grp["received_currency"]).sum())
-        a["cross_border_tx"] += int((grp["sender_bank_location"] != grp["receiver_bank_location"]).sum())
-        a["total_tx"] += len(grp)
-        a["risk_probs"].extend(grp["prediction_probability"].tolist())
-
-    for acc, grp in df.groupby("receiver_account"):
-        if acc not in accounts:
-            accounts[acc] = _new_account(acc)
-        a = accounts[acc]
-        a["total_received"] += float(grp["amount"].sum())
-        a["tx_count_received"] += len(grp)
-        a["unique_partners"].update(grp["sender_account"].unique())
-        a["total_tx"] += len(grp)
-        a["risk_probs"].extend(grp["prediction_probability"].tolist())
-
-    # Finalize accounts
-    for acc_id, a in accounts.items():
-        total_tx = max(a["total_tx"], 1)
-        probs = a["risk_probs"]
-        avg_risk = float(np.mean(probs)) if probs else 0.0
-        max_risk = float(np.max(probs)) if probs else 0.0
-        a["risk_category"] = get_risk_category(max_risk)
-        a["risk_score"] = round(max_risk * 100, 2)
-        a["avg_risk_score"] = round(avg_risk * 100, 2)
-        a["unique_partners"] = len(a["unique_partners"])
-        a["foreign_currency_ratio"] = round(a["foreign_tx"] / total_tx, 4)
-        a["cross_border_ratio"] = round(a["cross_border_tx"] / total_tx, 4)
-        a["total_sent"] = round(a["total_sent"], 2)
-        a["total_received"] = round(a["total_received"], 2)
-        del a["risk_probs"]
-        del a["foreign_tx"]
-        del a["cross_border_tx"]
-        del a["total_tx"]
-
-    # ── 3) Drop old data and insert new ──
-    print("  🔄 Inserting transactions into MongoDB ...")
-    db.transactions.drop()
-
-    # Prepare transaction documents
-    tx_cols = [
-        "sender_account", "receiver_account", "amount",
-        "payment_currency", "received_currency",
-        "sender_bank_location", "receiver_bank_location",
-        "payment_type", "datetime", "is_laundering",
-        "prediction_probability", "prediction_risk_category",
-    ]
-    tx_docs = []
-    for _, row in df[tx_cols].iterrows():
-        doc = row.to_dict()
-        # Convert datetime to string for MongoDB
-        if pd.notna(doc.get("datetime")):
-            doc["datetime"] = str(doc["datetime"])
-        else:
-            doc["datetime"] = None
-        # Ensure float for probability
-        doc["prediction_probability"] = round(float(doc["prediction_probability"]), 6)
-        tx_docs.append(doc)
-
-    # Batch insert (10K per batch)
-    batch_size = 10000
-    for i in range(0, len(tx_docs), batch_size):
-        batch = tx_docs[i:i + batch_size]
-        db.transactions.insert_many(batch, ordered=False)
-        print(f"    Inserted {min(i + batch_size, len(tx_docs)):,} / {len(tx_docs):,} transactions")
-
-    print(f"  ✓ Transactions: {len(tx_docs):,} documents")
-
-    # ── 4) Insert accounts ──
-    print("  🔄 Inserting accounts into MongoDB ...")
-    db.accounts.drop()
-    acc_docs = list(accounts.values())
-
-    for i in range(0, len(acc_docs), batch_size):
-        batch = acc_docs[i:i + batch_size]
-        db.accounts.insert_many(batch, ordered=False)
-        print(f"    Inserted {min(i + batch_size, len(acc_docs)):,} / {len(acc_docs):,} accounts")
-
-    print(f"  ✓ Accounts: {len(acc_docs):,} documents")
-
-    # ── 5) Insert training metrics ──
-    print("  🔄 Inserting training metrics ...")
-    metrics_doc = metrics_output.copy()
-    metrics_doc["run_id"] = datetime.now().isoformat()
-    metrics_doc["created_at"] = datetime.now()
-
-    # Sanitize NaN values in training_history
-    for h in metrics_doc.get("training_history", []):
-        for k, v in h.items():
-            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
-                h[k] = None
-
-    db.training_metrics.insert_one(metrics_doc)
-    print(f"  ✓ Training metrics: 1 document")
-
-    # Re-create indexes after drop
-    setup_sync_indexes(db)
-
-    close_sync_db()
-    print("  ✓ MongoDB population complete!")
+    with open(paths["metrics"], "w", encoding="utf-8") as f:
+        json.dump(output, f, indent=2)
+    np.save(os.path.join(os.path.dirname(paths["metrics"]), paths["probs"]), tp_)
+    logger.info(f"\n  Model  : {paths['model']}")
+    logger.info(f"  Metrik : {paths['metrics']}")
+    logger.info("\n[OK] Training v2 selesai.")
+    return output
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Training GAT v2.")
+    parser.add_argument("--version", choices=["v2", "v3", "v4", "v5"], default="v2",
+                        help="Dataset: v2, v3, v4, atau v5 (fitur konteks + ensemble).")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Seed acak. Seed selain bawaan menulis ke berkas terpisah "
+                             "sehingga beberapa run dapat dirata-ratakan menjadi ensemble.")
+    args = parser.parse_args()
+    main(args.version, args.seed)

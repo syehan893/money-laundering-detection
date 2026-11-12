@@ -27,7 +27,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from backend.ml.model import EdgeGATModel, get_risk_category
+from backend.ml.legacy.model import EdgeGATModel, get_risk_category
 from backend.config import CSV_PATH, DATA_PATH, MODEL_PATH, ENCODERS_PATH, METRICS_PATH
 
 MONGO_URL = os.getenv(

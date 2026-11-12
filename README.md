@@ -276,11 +276,16 @@ money-laundering-detection/
 │   │   ├── __init__.py
 │   │   ├── model.py              # EdgeGATModel + FocalLoss
 │   │   ├── train.py              # Training & evaluation pipeline
+│   │   ├── evaluate.py           # Evaluation & threshold selection helpers
+│   │   ├── utils.py              # Reproducibility & device helpers
 │   │   └── data_pipeline.py      # CSV → PyG graph construction
 │   └── scripts/                  # Utility scripts
 │       ├── augment_data.py       # Synthetic laundering injection
 │       ├── seed_db.py            # (Legacy) DB seeder
 │       └── explore_data.py       # Data verification
+│
+├── scripts/                      # Top-level orchestration scripts
+│   └── retrain_gat.py            # One-command full retraining pipeline
 │
 ├── data/                         # Data & model artifacts
 │   ├── SAML-D.csv                # Transaction dataset (107MB, 152K+ rows)
@@ -419,11 +424,12 @@ Edge Features (8) ─→ Edge MLP (8 → 32) ───────────�
 
 **Key Design Decisions:**
 
-- **2-layer GAT encoder** with BatchNorm and ELU activation
-- **Multi-head attention** (4 heads) in first layer for diverse feature extraction
+- **3-layer GAT encoder** with optional LayerNorm, BatchNorm, residual connections, and ELU activation
+- **Multi-head attention** (4 heads) in first layers for diverse feature extraction
 - **Edge-aware classification** — combines source/destination node embeddings with edge features
 - **Chunked edge processing** (200K edges/chunk) to control VRAM usage on consumer GPUs
-- **Focal Loss** (`α=0.9, γ=2.0`) to aggressively focus on the rare positive class (~0.5%)
+- **Cost-sensitive Focal Loss** (`α=0.95, γ=2.0`, `FN cost=10×`) to aggressively focus on missed laundering cases
+- **Hard-example mining** — false negatives/positives from previous epochs are oversampled
 
 #### FocalLoss
 
@@ -433,8 +439,10 @@ Addresses extreme class imbalance (legitimate ≫ laundering):
 FL(p_t) = -α_t · (1 - p_t)^γ · log(p_t)
 ```
 
-- `α = 0.9` → 90% weight on positive (laundering) class
+- `α = 0.95` → 95% weight on positive (laundering) class
 - `γ = 2.0` → Down-weight easy negatives, focus on hard-to-classify samples
+- `FN cost = 10×` → Explicitly penalize missed laundering cases 10× more than false alarms
+- Label smoothing → 0.05 to improve generalization
 
 ---
 
@@ -444,34 +452,48 @@ FL(p_t) = -α_t · (1 - p_t)^γ · log(p_t)
 
 **Optimized for:** RTX 3060 (6GB VRAM) + 16GB RAM
 
-| Feature                         | Implementation                                   |
-| ------------------------------- | ------------------------------------------------ |
-| **Mixed Precision (AMP)** | `torch.amp.autocast` — ~40% VRAM reduction    |
-| **Balanced Sampling**     | Oversample positive edges 3:1 per epoch          |
-| **Cosine LR Schedule**    | With warm restarts (`T_0=20, T_mult=1`)        |
-| **Threshold Tuning**      | Sweep 0.1–0.95 to maximize F1 on validation set |
-| **Early Stopping**        | Patience = 15 epochs on validation F1            |
+| Feature                              | Implementation                                                 |
+| ------------------------------------ | -------------------------------------------------------------- |
+| **Mixed Precision (AMP)**      | `torch.amp.autocast` — ~40% VRAM reduction                  |
+| **Balanced Sampling**          | Oversample positive edges 5:1 per epoch                       |
+| **Hard-Example Mining**        | Oversample false negatives/positives from previous epochs     |
+| **Cosine LR Schedule**         | With warm restarts (`T_0=20, T_mult=2`)                     |
+| **Threshold Tuning**           | Constraint-based sweep to keep FPR & FNR below 0.1% per class |
+| **Early Stopping**             | Patience = 40 epochs on validation constraint score           |
+| **Checkpointing**              | Saves best, last, and periodic checkpoints                    |
+| **Logging**                    | Structured logs to `logs/training.log`                        |
 
 **Hyperparameters:**
 
-| Parameter         | Value  |
-| ----------------- | ------ |
-| Learning Rate     | 0.0005 |
-| Weight Decay      | 1e-5   |
-| Hidden Dim        | 64     |
-| Attention Heads   | 4      |
-| Dropout           | 0.3    |
-| Focal Alpha       | 0.9    |
-| Focal Gamma       | 2.0    |
-| Oversample Ratio  | 3.0    |
-| Optimal Threshold | 0.90   |
-| Epochs Trained    | 61     |
+| Parameter            | Value  |
+| -------------------- | ------ |
+| Learning Rate        | 0.0005 |
+| Weight Decay         | 1e-5   |
+| Hidden Dim           | 64     |
+| Attention Heads      | 4      |
+| GAT Layers           | 3      |
+| Dropout              | 0.3    |
+| Focal Alpha          | 0.95   |
+| Focal Gamma          | 2.0    |
+| FN Cost              | 10.0   |
+| Label Smoothing      | 0.05   |
+| Oversample Ratio     | 5.0    |
+| Hard Mining Ratio    | 0.3    |
+| Optimal Threshold    | tuned  |
+| Epochs Trained       | ≤150   |
 
 ```bash
+# Option 1: Train only
 python -m backend.ml.train
+
+# Option 2: Full pipeline in one command
+python scripts/retrain_gat.py
+
+# Option 3: Force regeneration of processed_data.pt
+python scripts/retrain_gat.py --force-pipeline
 ```
 
-**Output:** `data/best_model.pt` (144KB), `data/training_metrics.json` (21KB)
+**Output:** `data/best_model.pt`, `data/training_metrics.json`, `logs/training.log`, `data/checkpoints/*.pt`
 
 After training completes, `train.py` also **populates MongoDB** with:
 

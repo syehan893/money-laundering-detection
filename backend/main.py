@@ -39,7 +39,7 @@ from pydantic import BaseModel, Field
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend.database import connect_async_db, close_async_db, get_async_db
-from backend.ml.model import EdgeGATModel, get_risk_category
+from backend.ml.legacy.model import EdgeGATModel, get_risk_category
 from backend.config import MODEL_PATH, ENCODERS_PATH, DATA_PATH
 
 

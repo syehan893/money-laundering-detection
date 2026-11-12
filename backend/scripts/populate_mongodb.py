@@ -23,7 +23,7 @@ import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from backend.ml.model import EdgeGATModel, get_risk_category
+from backend.ml.legacy.model import EdgeGATModel, get_risk_category
 from backend.config import (
     DATA_PATH, MODEL_PATH, METRICS_PATH, CSV_PATH,
     TRAIN_CSV_PATH, VAL_CSV_PATH, TEST_CSV_PATH,

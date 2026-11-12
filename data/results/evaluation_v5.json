@@ -1,0 +1,35 @@
+{
+  "versi": "v5",
+  "n_seed": 3,
+  "threshold": 0.727756679058075,
+  "threshold_dipilih_pada": "validation",
+  "kriteria_ambang": "minimum FP+FN",
+  "confusion_matrix": {
+    "tn": 420804,
+    "fp": 62,
+    "fn": 80,
+    "tp": 68191
+  },
+  "metrik": {
+    "precision": 0.9990916150205852,
+    "recall": 0.9988281993818752,
+    "f1": 0.9989598898362193,
+    "accuracy": 0.9997096927854568,
+    "fpr": 0.00014731529750561936,
+    "fnr": 0.001171800618124826
+  },
+  "validation": {
+    "tn": 187007,
+    "fp": 29,
+    "fn": 42,
+    "tp": 30982
+  },
+  "pembanding": {
+    "v4_titik_operasi_asli": {
+      "tn": 420386,
+      "fp": 480,
+      "fn": 86,
+      "tp": 68185
+    }
+  }
+}

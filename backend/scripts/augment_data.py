@@ -34,11 +34,11 @@ import pandas as pd
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from backend.config import CSV_PATH, DATA_DIR
+from backend.config import CSV_PATH, DATA_DIR, resolve
 
 INPUT_CSV = CSV_PATH
 OUTPUT_CSV = CSV_PATH  # Overwrite original
-BACKUP_CSV = os.path.join(DATA_DIR, "SAML-D_original_backup.csv")
+BACKUP_CSV = resolve("SAML-D_original_backup.csv")
 
 # Seed for reproducibility
 random.seed(42)
@@ -360,8 +360,8 @@ def main():
 
     print("\n" + "=" * 58)
     print("  NEXT STEPS:")
-    print("  1. python -m backend.ml.data_pipeline   (rebuild graph)")
-    print("  2. python -m backend.ml.train           (retrain model)")
+    print("  1. python -m backend.ml.legacy.data_pipeline   (rebuild graph)")
+    print("  2. python -m backend.ml.legacy.train           (retrain model)")
     print("=" * 58)
     print("\n[done] Data augmentation complete!\n")
 

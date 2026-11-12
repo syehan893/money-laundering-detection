@@ -19,7 +19,7 @@ from sklearn.metrics import classification_report, confusion_matrix, f1_score, p
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from backend.ml.model import EdgeGATModel, FocalLoss, get_risk_category
+from backend.ml.legacy.model import EdgeGATModel, FocalLoss, get_risk_category
 from backend.config import DATA_PATH, MODEL_PATH, METRICS_PATH, ENCODERS_PATH
 from backend.config import FOCAL_ALPHA, FOCAL_GAMMA
 

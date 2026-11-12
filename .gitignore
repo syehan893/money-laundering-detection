@@ -1,23 +1,47 @@
-# Node modules
+# Node
 node_modules/
-frontend/node_modules/
+frontend-next/.next/
+frontend-next/out/
+*.tsbuildinfo
+
+# Dokumentasi skripsi dan arsip lokal
+docs/
+_to_delete/
 
 # Python cache
 __pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+.ipynb_checkpoints/
+dist/
+build/
 
-# Dataset files (too large for GitHub)
+# Dataset (data/raw/*.csv, puluhan–ratusan MB)
 *.pptx
 *.csv
-data/SAML-D.csv
-data/SAML-D_original_backup.csv
 
-# Model artifacts (too large for GitHub)
-# data/processed_data.pt
-# data/best_model.pt
-# data/encoders.pkl
-# *.pt
+# Artefak training yang dihasilkan ulang
+# processed_data_v5.pt ~371 MB, melewati batas file GitHub
+data/processed/*.pt
+data/checkpoints/
+data/results/*.npy
+logs/
+*.npy
+
+# Bobot lain. Tiga file ini dipakai inference ensemble v5 (~0,4 MB masing-masing).
+*.pt
+!data/models/best_model_v5.pt
+!data/models/best_model_v5_seed1337.pt
+!data/models/best_model_v5_seed2024.pt
+
+# Encoder v5 (~18 MB) tetap di-commit: inference tidak jalan tanpanya.
 # *.pkl
 
 # IDE
@@ -25,16 +49,21 @@ data/SAML-D_original_backup.csv
 .idea/
 .gemini/
 
-# Environment
+# Environment. .env.example tetap di-commit.
 .env
+.env.*
+!.env.example
+
+# Virtualenv
 venv/
 .venv/
 
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# Screenshots / mockups (optional)
+# Screenshots / mockups
 images_screenshot/
 training_screenshot/
 stitch_aml_guard_*/

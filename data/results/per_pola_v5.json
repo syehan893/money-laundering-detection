@@ -1,0 +1,52 @@
+{
+  "versi": "v5 (ensemble 3 seed)",
+  "threshold": 0.727756679058075,
+  "per_pola": [
+    {
+      "pola": "Fan_Out",
+      "label": "Fan-Out",
+      "jumlah": 13773,
+      "terdeteksi": 13738,
+      "tidak_terdeteksi": 35,
+      "recall": 0.997459
+    },
+    {
+      "pola": "Fan_In",
+      "label": "Fan-In",
+      "jumlah": 13304,
+      "terdeteksi": 13281,
+      "tidak_terdeteksi": 23,
+      "recall": 0.998271
+    },
+    {
+      "pola": "Scatter_Gather",
+      "label": "Scatter-Gather (Smurfing)",
+      "jumlah": 13849,
+      "terdeteksi": 13843,
+      "tidak_terdeteksi": 6,
+      "recall": 0.999567
+    },
+    {
+      "pola": "Gather_Scatter",
+      "label": "Gather-Scatter (Mixer)",
+      "jumlah": 13765,
+      "terdeteksi": 13751,
+      "tidak_terdeteksi": 14,
+      "recall": 0.998983
+    },
+    {
+      "pola": "Simple_Cycle",
+      "label": "Simple Cycle (Round-Tripping)",
+      "jumlah": 13580,
+      "terdeteksi": 13578,
+      "tidak_terdeteksi": 2,
+      "recall": 0.999853
+    }
+  ],
+  "total": {
+    "jumlah": 68271,
+    "terdeteksi": 68191,
+    "tidak_terdeteksi": 80,
+    "recall": 0.998828
+  }
+}

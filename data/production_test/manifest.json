@@ -1,0 +1,75 @@
+{
+  "sumber": "test_v4.csv",
+  "seed": 7,
+  "berkas": [
+    {
+      "berkas": "01_normal_only.csv",
+      "deskripsi": "500 transaksi normal berurutan dari satu jendela waktu",
+      "harapan": "Nyaris tidak ada yang ditandai. Setiap penandaan adalah false positive.",
+      "baris": 500,
+      "laundering": 0,
+      "normal": 500,
+      "rasio_laundering_persen": 0.0,
+      "tipologi": {}
+    },
+    {
+      "berkas": "02_mixed_realistic.csv",
+      "deskripsi": "3,500 transaksi berurutan apa adanya, 757 di antaranya laundering (21.6%)",
+      "harapan": "Jendela waktu utuh tanpa penyaringan. Metriknya sebanding dengan hasil evaluasi pada data uji.",
+      "baris": 3500,
+      "laundering": 757,
+      "normal": 2743,
+      "rasio_laundering_persen": 21.63,
+      "tipologi": {
+        "Scatter_Gather": 240,
+        "Gather_Scatter": 185,
+        "Simple_Cycle": 158,
+        "Fan_In": 87,
+        "Fan_Out": 87
+      }
+    },
+    {
+      "berkas": "03_pattern_fan.csv",
+      "deskripsi": "300 transaksi: 240 pola fan-in/fan-out/mixer + 60 normal",
+      "harapan": "Pola penyebaran dan pengumpulan dana. Recall diharapkan tinggi.",
+      "baris": 300,
+      "laundering": 240,
+      "normal": 60,
+      "rasio_laundering_persen": 80.0,
+      "tipologi": {
+        "Scatter_Gather": 72,
+        "Gather_Scatter": 62,
+        "Fan_Out": 60,
+        "Fan_In": 46
+      }
+    },
+    {
+      "berkas": "04_pattern_layering.csv",
+      "deskripsi": "300 transaksi: 240 pola berlapis & siklus + 60 normal",
+      "harapan": "Pola tersulit: tiap transaksi tampak biasa, yang mencurigakan adalah rangkaiannya. Recall diharapkan paling rendah.",
+      "baris": 300,
+      "laundering": 240,
+      "normal": 60,
+      "rasio_laundering_persen": 80.0,
+      "tipologi": {
+        "Simple_Cycle": 240
+      }
+    },
+    {
+      "berkas": "05_edge_cases.csv",
+      "deskripsi": "200 kasus ekstrem: nominal terbesar/terkecil, lintas negara, dekat ambang lapor",
+      "harapan": "Menguji ketahanan, bukan akurasi. Tidak boleh ada error; skor harus tetap masuk akal.",
+      "baris": 200,
+      "laundering": 20,
+      "normal": 180,
+      "rasio_laundering_persen": 10.0,
+      "tipologi": {
+        "Fan_Out": 7,
+        "Fan_In": 6,
+        "Scatter_Gather": 3,
+        "Gather_Scatter": 2,
+        "Simple_Cycle": 2
+      }
+    }
+  ]
+}

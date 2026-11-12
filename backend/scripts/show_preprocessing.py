@@ -258,7 +258,7 @@ def main():
     # Check prerequisites
     if not os.path.exists(DATA_PATH):
         print("\n  [ERROR] processed_data.pt not found!")
-        print("     Run: python -m backend.ml.data_pipeline")
+        print("     Run: python -m backend.ml.legacy.data_pipeline")
         return
 
     import torch
